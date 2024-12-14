@@ -1,8 +1,6 @@
-"""Battery Manager 2 module."""
+"""Battery Manager module."""
 
 import datetime
-
-# import logging
 from zoneinfo import ZoneInfo
 
 import bess
@@ -14,11 +12,6 @@ from bess.constants import (
     TIBBER_MARKUP_SEK_PER_KWH,
 )
 import pandas as pd
-
-# Configure logging
-# logging.basicConfig(level=logging.INFO)
-# log = logging.getLogger(__name__)
-# logger.set_level(**{"custom_components.pyscript": "info"})
 
 
 class BatteryManager:
@@ -61,7 +54,7 @@ class BatteryManager:
         # Create a pandas DataFrame with the electricity prices
         self.electricity_prices_df = pd.DataFrame(
             {
-                "Hour": range(len(today_electricity_price)),
+                "Timestamp": range(len(today_electricity_price)),
                 "ElectricityPrice": today_electricity_price,
             }
         )
@@ -129,8 +122,10 @@ class BatteryManager:
 
     def is_arbitrage_profitable(self) -> bool:
         """Determine if arbitrage is profitable."""
-        bess.bess_algorithm_italian(self.electricity_prices_df)
-        return True
+        df_res = bess.bess_algorithm_italian(self.electricity_prices_df)
+        profit = df_res["Earning"].sum()
+        log.info("Earnings for interval: %d SEK", profit)  # noqa: F821
+        return profit > 0
 
     def enable_discharge_schedule(self, enable: bool):
         """Enable or disable discharge scheduling."""
@@ -152,7 +147,7 @@ class BatteryManager:
         """Calculate the discharge schedule based on electricity prices."""
 
         battery_charge_kwh = BATTERY_STORAGE_SIZE_KWH
-        battery_soc = 100.0
+        battery_soc = 99.0
 
         battery_charge_kwh_per_hour = [0] * 24
         battery_soc_per_hour = [0] * 24
@@ -221,7 +216,7 @@ def scheduler():
     bm.fetch_electricity_prices()
     bm.fetch_battery_settings()
     bm.fetch_predicted_consumption()
-    #    bm.print_status()
+    bm.print_status()
     bm.update_grid_charge_schedule()
 
     if bm.is_arbitrage_profitable():
