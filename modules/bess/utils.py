@@ -12,7 +12,11 @@ def plot_multiple_graphs(
     dfs: List[pd.DataFrame], titles: List[str], nrows: int, ncols: int, filename: str
 ) -> None:
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 10))
-    axes = axes.flatten()  # Flatten the 2D array of axes for easy iteration
+
+    if nrows == 1 and ncols == 1:
+        axes = [axes]  # Convert single Axes object to a list
+    else:
+        axes = axes.flatten()  # Flatten the 2D array of axes for easy iteration
 
     for i, (df, title) in enumerate(zip(dfs, titles)):
         if i >= len(axes):
@@ -341,3 +345,16 @@ def print_to_terminal(df, columns_to_print):
     print(df[columns].round(3))
     profit = df["Earning"].sum().round(2)
     print(f"Profit {profit}  SEK")
+
+
+def print_to_excel(df, columns_to_print, filename):
+    if not filename.endswith('.xlsx'):
+        filename += '.xlsx'  
+    
+    # Ensure datetimes are timezone-unaware
+    df_to_save = df[columns_to_print].copy()
+    df_to_save.index = df_to_save.index.tz_localize(None)
+        
+    # Save to Excel
+    with pd.ExcelWriter(filename) as writer:
+        df_to_save.to_excel(writer, sheet_name='Sheet1')

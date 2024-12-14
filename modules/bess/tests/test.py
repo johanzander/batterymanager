@@ -11,7 +11,7 @@ from modules.bess.constants import (
     TAX_REDUCTION_SOLD_ELECTRICITY,
     TIBBER_MARKUP_SEK_PER_KWH,
 )
-from modules.bess.utils import plot_multiple_graphs, print_to_terminal
+from modules.bess.utils import plot_multiple_graphs, print_to_terminal, print_to_excel
 
 
 if __name__ == "__main__":
@@ -41,9 +41,12 @@ if __name__ == "__main__":
     titles = []
     for date, daily_df in df_results.resample("D"):
         if not daily_df.empty:
-            logging.info("Processing data for %s", date.date())
+            date_str = str(date.date())
+            logging.info("Processing data for %s", date_str)
             print_to_terminal(daily_df, columns_to_print)
+            print_to_excel(daily_df, columns_to_print, date_str)
             daily_dfs.append(daily_df)
             titles.append(str(date.date()))
+            plot_multiple_graphs(daily_dfs, titles, nrows=1, ncols=1, filename=date_str)
 
-    plot_multiple_graphs(daily_dfs, titles, nrows=3, ncols=2, filename="daily_plots")
+    

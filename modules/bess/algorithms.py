@@ -33,8 +33,6 @@ def bess_algorithm_italian(df: pd.DataFrame) -> pd.DataFrame:
     # Stage 1: This is a preliminary stage, in which the input data are provided.
     # In this stage the min/max values are derived.
 
-    logging.info(" KUKEN() ")
-
     # Initialize electricity prices
     electricity_price_nordpool = df["ElectricityPrice"].values
     electricity_price_buy = df["ElectricityPriceBuy"].values
