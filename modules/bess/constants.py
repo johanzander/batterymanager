@@ -6,8 +6,8 @@ BATTERY_STORAGE_SIZE_KWH = 30
 # Minimum state of charge (SOC) in percent
 BATTERY_MIN_SOC = 10
 
-# Maximum charge/discharge rate in kW
-MAX_CHARGE_DISCHARGE_RATE_KW = 15
+# Maximum charge/discharge rate in kW: 2500W / battery * 6 batteries
+BATTERY_MAX_CHARGE_DISCHARGE_RATE_KW = 15
 
 # Cost for a 1 kWh battery charge/discharge cycle in SEK
 BATTERY_CHARGE_CYCLE_COST_SEK = 0.50

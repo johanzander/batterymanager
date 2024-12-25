@@ -1,272 +1,349 @@
 """Battery Manager module."""
 
 import datetime
-from zoneinfo import ZoneInfo
 
 import bess
-from bess.constants import (
-    ADDITIONAL_ELECTRICITY_COSTS_SEK_PER_KWH,
-    BATTERY_MIN_SOC,
-    BATTERY_STORAGE_SIZE_KWH,
-    TAX_REDUCTION_SOLD_ELECTRICITY,
-    TIBBER_MARKUP_SEK_PER_KWH,
-)
 import pandas as pd
 
 
-class BatteryManager:
-    """A dummy class for demonstration purposes."""
+class ElectricityPrices:
+    """A class for managing electricity prices."""
 
     def __init__(self):
-        """Initialize the BatteryManager with default values."""
         self.electricity_prices_df: pd.DataFrame = None
-        # Battery settings
-        self.battery_scheduling_enabled = False
-        self.grid_charge_enabled = False
-        self.charge_stop_soc = 0
-        self.charging_power_rate = 0
-        self.discharging_power_rate = 0
-        self.discharge_stop_soc = 0
-        # Predicted energy consumption
-        self.estimated_energy_consumption_per_hour_kwh = 0
-        self.battery_capacity_to_use = 0
-        self.hours_of_energy = 0
-        self.discharge_rate_hour_kwh = 0
 
-    def fetch_predicted_consumption(self):
-        """Fetch the predicted energy consumption."""
-        self.estimated_energy_consumption_per_hour_kwh = 4.5
-        self.battery_capacity_to_use = float(
-            BATTERY_STORAGE_SIZE_KWH * (1 - BATTERY_MIN_SOC / 100)
-        )
-        self.hours_of_energy = int(
-            BATTERY_STORAGE_SIZE_KWH / self.estimated_energy_consumption_per_hour_kwh
-        )
-        self.discharge_rate_hour_kwh = float(
-            self.battery_capacity_to_use / self.hours_of_energy
-        )
-
-    def fetch_electricity_prices(self):
+    def get_electricity_prices(self) -> pd.DataFrame:
         """Update the electricity prices and store them in a pandas DataFrame."""
         # Fetch current electricity price from Nordpool sensor's today attribute
+        #        today_electricity_price = sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow  # noqa: F821
         today_electricity_price = sensor.nordpool_kwh_se4_sek_2_10_025.today  # noqa: F821
-
+        # Test list with electricity prices
+        electricity_prices_2024_08_16 = [
+            0.9827,
+            0.8419,
+            0.0321,
+            0.0097,
+            0.0098,
+            0.9136,
+            1.4433,
+            1.5162,
+            1.4029,
+            1.1346,
+            0.8558,
+            0.6485,
+            0.2895,
+            0.1363,
+            0.1253,
+            0.6200,
+            0.8880,
+            1.1662,
+            1.5163,
+            2.5908,
+            2.7325,
+            1.9312,
+            1.5121,
+            1.3056,
+        ]
+        #        today_electricity_price = electricity_prices_2024_08_16
         # Create a pandas DataFrame with the electricity prices
         self.electricity_prices_df = pd.DataFrame(
             {
-                "Timestamp": range(len(today_electricity_price)),
+                "Timestamp": pd.date_range(
+                    start=datetime.datetime.now().replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ),
+                    periods=len(today_electricity_price),
+                    freq="h",
+                ),
                 "ElectricityPrice": today_electricity_price,
             }
         )
 
+        self.electricity_prices_df.set_index("Timestamp", inplace=True)
+
         self.electricity_prices_df["ElectricityPriceBuy"] = (
-            self.electricity_prices_df["ElectricityPrice"] + TIBBER_MARKUP_SEK_PER_KWH
-        ) * 1.25 + ADDITIONAL_ELECTRICITY_COSTS_SEK_PER_KWH
+            self.electricity_prices_df["ElectricityPrice"]
+            + bess.TIBBER_MARKUP_SEK_PER_KWH
+        ) * 1.25 + bess.ADDITIONAL_ELECTRICITY_COSTS_SEK_PER_KWH
         self.electricity_prices_df["ElectricityPriceSell"] = (
             self.electricity_prices_df["ElectricityPrice"]
-            + TAX_REDUCTION_SOLD_ELECTRICITY
+            + bess.TAX_REDUCTION_SOLD_ELECTRICITY
         )
 
-        log.info(  # noqa: F821
-            "\n------------------\nElectricity prices\n------------------\n%s",
-            self.electricity_prices_df,
+        return self.electricity_prices_df
+
+
+class GrowattInverterController:
+    """A class for controlling a Growatt inverter."""
+
+    def __init__(self):
+        """Initialize the BatteryManager with default values."""
+        self.df_batt_schedule: pd.DataFrame = None
+
+    def get_battery_soc(self) -> int:
+        """Get the battery state of charge (SOC)."""
+        return int(state.get("sensor.rkm0d7n04x_statement_of_charge_soc"))
+
+    def get_charge_stop_soc(self) -> int:
+        """Get the charge stop state of charge (SOC)."""
+        return int(state.get("number.rkm0d7n04x_charge_stop_soc"))
+
+    def set_charge_stop_soc(self, charge_stop_soc: int):
+        """Set the charge stop state of charge (SOC)."""
+        service.call(
+            "number",
+            "set_value",
+            entity_id="number.rkm0d7n04x_charge_stop_soc",
+            value=charge_stop_soc,
+            blocking=True,
         )
 
-    def fetch_battery_settings(self):
-        """Update the battery status from the state."""
-        self.battery_scheduling_enabled = (
-            state.get("input_boolean.battery_scheduling") == "on"  # noqa: F821
-        )
-        self.grid_charge_enabled = (
-            state.get("switch.rkm0d7n04x_charge_from_grid") == "on"  # noqa: F821
-        )
-        self.charge_stop_soc = int(state.get("number.rkm0d7n04x_charge_stop_soc"))  # noqa: F821
-        self.charging_power_rate = int(
-            state.get("number.rkm0d7n04x_charging_power_rate")  # noqa: F821
-        )
-        self.discharging_power_rate = int(
-            state.get("number.rkm0d7n04x_discharging_power_rate")  # noqa: F821
-        )
-        self.discharge_stop_soc = int(state.get("number.rkm0d7n04x_discharge_stop_soc"))  # noqa: F821
+    def get_discharge_stop_soc(self) -> int:
+        """Get the discharge stop state of charge (SOC)."""
+        return int(state.get("number.rkm0d7n04x_discharge_stop_soc"))
 
-    def print_status(self):
+    def set_discharge_stop_soc(self, discharge_stop_soc: int):
+        """Set the charge stop state of charge (SOC)."""
+        service.call(
+            "number",
+            "set_value",
+            entity_id="number.rkm0d7n04x_discharge_stop_soc",
+            value=discharge_stop_soc,
+            blocking=True,
+        )
+
+    def get_charging_power_rate(self) -> int:
+        """Get the charging power rate."""
+        return int(state.get("number.rkm0d7n04x_charging_power_rate"))
+
+    def set_charging_power_rate(self, rate: int):
+        """Set the charging power rate."""
+        service.call(  # noqa: F821
+            "number",
+            "set_value",
+            entity_id="number.rkm0d7n04x_charging_power_rate",
+            value=rate,
+            blocking=True,
+        )
+
+    def get_discharging_power_rate(self) -> int:
+        """Get the discharging power rate."""
+        return int(state.get("number.rkm0d7n04x_discharging_power_rate"))
+
+    def set_discharging_power_rate(self, rate: int):
+        """Set the discharging power rate."""
+        service.call(  # noqa: F821
+            "number",
+            "set_value",
+            entity_id="number.rkm0d7n04x_discharging_power_rate",
+            value=rate,
+            blocking=True,
+        )
+
+    def set_battery_scheduling(self, enable: bool):
+        """Enable or disable battery discharge scheduling."""
+        action = "turn_on" if enable else "turn_off"
+        service.call(  # noqa: F821
+            "input_boolean",
+            action,
+            entity_id="input_boolean.battery_scheduling",
+            blocking=True,
+        )
+
+    def battery_scheduling_enabled(self) -> bool:
+        """Return True if battery scheduling is enabled."""
+        return state.get("input_boolean.battery_scheduling") == "on"  # noqa: F821
+
+    def set_grid_charge(self, enable: bool):
+        """Enable or disable grid charging."""
+        if enable:
+            log.info("Enabling grid charge")
+            switch.turn_on(  # noqa: F821
+                entity_id="switch.rkm0d7n04x_charge_from_grid", blocking=True
+            )
+        else:
+            log.info("Disabling grid charge")
+            switch.turn_off(  # noqa: F821
+                entity_id="switch.rkm0d7n04x_charge_from_grid", blocking=True
+            )
+
+    def grid_charge_enabled(self) -> bool:
+        """Return True if grid charging is enabled."""
+        return state.get("switch.rkm0d7n04x_charge_from_grid") == "on"
+
+    def set_inverter_time_segment(
+        self,
+        segment_id: int,
+        batt_mode: str,
+        start_time: int,
+        end_time: int,
+        enabled: bool,
+    ):
+        """Set the inverter time segment with the specified parameters."""
+        log.info(
+            "Setting inverter time segment: segment_id=%d, batt_mode=%s, start_time=%s, end_time=%s, enabled=%s",
+            segment_id,
+            batt_mode,
+            start_time,
+            end_time,
+            enabled,
+        )
+        hass.services.async_call(
+            "growatt_server",
+            "update_tlx_inverter_time_segment",
+            {
+                "segment_id": segment_id,
+                "batt_mode": batt_mode,
+                "start_time": start_time,
+                "end_time": end_time,
+                "enabled": enabled,
+            },
+            True,
+        )
+
+    def print_inverter_status(self):
         """Print the battery settings and consumption prediction."""
-        log.info(  # noqa: F821
+        log.info(
             "\n------------------------\n"
             "Battery Settings\n"
             "------------------------\n"
-            "Discharge Scheduling Enabled:   %s\n"
-            "Charge from Grid:               %s\n"
-            "Charge Stop SOC:                %3d%%\n"
-            "Charging Power Rate:            %3d%%\n"
-            "Discharging Power Rate:         %3d%%\n"
-            "Discharge Stop SOC:             %3d%%\n"
-            "\n------------------------\n"
-            "Consumption Prediction\n"
-            "------------------------\n"
-            "Estimated Consumption per Hour: %3.1f kWh\n"
-            "Battery Capacity to Use:       %3.1f kWh\n"
-            "Hours of Energy:                %3d hours\n"
-            "Discharge Rate per Hour:        %3.1f kWh\n",
-            self.battery_scheduling_enabled,
-            self.grid_charge_enabled,
-            self.charge_stop_soc,
-            self.charging_power_rate,
-            self.discharging_power_rate,
-            self.discharge_stop_soc,
-            self.estimated_energy_consumption_per_hour_kwh,
-            self.battery_capacity_to_use,
-            self.hours_of_energy,
-            self.discharge_rate_hour_kwh,
-        )
-
-    def is_arbitrage_profitable(self) -> bool:
-        """Determine if arbitrage is profitable."""
-        df_res = bess.bess_algorithm_italian(self.electricity_prices_df)
-        profit = df_res["Earning"].sum()
-        log.info("Earnings for interval: %d SEK", profit)  # noqa: F821
-        return profit > 0
-
-    def enable_discharge_schedule(self, enable: bool):
-        """Enable or disable discharge scheduling."""
-        if enable:
-            service.call(  # noqa: F821
-                "input_boolean",
-                "turn_on",
-                entity_id="input_boolean.battery_scheduling",
-            )
-            self.calculate_discharge_schedule()
-        else:
-            service.call(  # noqa: F821
-                "input_boolean",
-                "turn_off",
-                entity_id="input_boolean.battery_scheduling",
-            )
-
-    def calculate_discharge_schedule(self):
-        """Calculate the discharge schedule based on electricity prices."""
-
-        battery_charge_kwh = BATTERY_STORAGE_SIZE_KWH
-        battery_soc = 99.0
-
-        battery_charge_kwh_per_hour = [0] * 24
-        battery_soc_per_hour = [0] * 24
-
-        # Find the self.hours_of_energy hours with the highest prices
-        highest_price_hours = self.electricity_prices_df.nlargest(
-            self.hours_of_energy, "ElectricityPrice"
-        ).index.tolist()
-
-        schedule_log = []
-        for hour in range(24):
-            if hour in highest_price_hours:
-                battery_charge_kwh -= self.discharge_rate_hour_kwh
-                battery_soc = (battery_charge_kwh / BATTERY_STORAGE_SIZE_KWH) * 100
-
-            battery_charge_kwh_per_hour[hour] = battery_charge_kwh
-            battery_soc_per_hour[hour] = battery_soc
-
-            schedule_log.append(
-                f"Hour: {hour:02d}, Battery Charge Target (kWh): {battery_charge_kwh:5.1f}, Battery SOC Target (%): {battery_soc:5.1f}"
-            )
-
-        log.info(  # noqa: F821
-            "\n=====================================================\n"
-            "Discharge schedule:\n"
-            "Highest %s price hours: %s\n"
-            "%s\n"
-            "=======================================================",
-            self.hours_of_energy,
-            ", ".join([f"{hour:02d}" for hour in highest_price_hours]),
-            "\n".join(schedule_log),
+            "Discharge Scheduling Enabled: %5s\n"
+            "Charge from Grid Enabled:     %5s\n"
+            "State of Charge (SOC):       %5d%%\n"
+            "Charge Stop SOC:             %5d%%\n"
+            "Charging Power Rate:         %5d%%\n"
+            "Discharging Power Rate:      %5d%%\n"
+            "Discharge Stop SOC:          %5d%%\n",
+            self.battery_scheduling_enabled(),
+            self.grid_charge_enabled(),
+            self.get_battery_soc(),
+            self.get_charge_stop_soc(),
+            self.get_charging_power_rate(),
+            self.get_discharging_power_rate(),
+            self.get_discharge_stop_soc(),
         )
 
     def update_grid_charge_schedule(self):
         """Update the grid charge schedule based on the current hour."""
-        # Fetch current hour
-        current_hour = datetime.datetime.now().hour
 
-        # Fetch current grid charge setting
-        grid_charge_enabled = state.get("switch.rkm0d7n04x_charge_from_grid") == "on"  # noqa: F821
+        current_hour = datetime.datetime.now().hour
+        grid_charge_enabled = self.grid_charge_enabled()
 
         # Check if current hour is between 11:00 and 06:00
         if current_hour >= 23 or current_hour < 6:
             if not grid_charge_enabled:
-                log.info("Enabling grid charge")  # noqa: F821
-                switch.turn_on(entity_id="switch.rkm0d7n04x_charge_from_grid")  # noqa: F821
+                self.set_grid_charge(True)
         elif grid_charge_enabled:
-            log.info("Disabling grid charge")  # noqa: F821
-            switch.turn_off(entity_id="switch.rkm0d7n04x_charge_from_grid")  # noqa: F821
+            self.set_grid_charge(False)
+
+    async def disable_all_TOU_settings(self):
+        """Clear the Time of Use (TOU) settings."""
+        self.set_grid_charge(False)
+        for segment_id in range(1, 2):
+            self.set_inverter_time_segment(
+                segment_id=segment_id,
+                batt_mode="battery-first",
+                start_time="00:00",
+                end_time="23:59",
+                enabled=False,
+            )
+
+    async def set_TOU_settings(self, schedule: pd.DataFrame):
+        """Set the Time of Use (TOU) settings based on the schedule."""
+        self.disable_all_TOU_settings()
+        for index, row in schedule.iterrows():
+            self.set_inverter_time_segment(
+                segment_id=index + 1,
+                batt_mode=row["GrowattState"],
+                start_time=row["StartTime"],
+                end_time=row["EndTime"],
+                enabled=True,
+            )
+
+    def set_hourly_settings(self, schedule: pd.DataFrame):
+        """Set the inverter schedule based on the schedule."""
+        current_hour = datetime.datetime.now().hour
+
+        target_discharge_power_rate = schedule.loc[current_hour, "Discharge Power Rate"]
+        current_discharge_power_rate = self.get_discharging_power_rate()
+        if target_discharge_power_rate != current_discharge_power_rate:
+            log.info(
+                "Changing discharging power rate from %d to %d",
+                current_discharge_power_rate,
+                target_discharge_power_rate,
+            )
+            self.set_discharging_power_rate(target_discharge_power_rate)
+        else:
+            log.info(
+                "Discharging power rate remains unchanged at %d",
+                current_discharge_power_rate,
+            )
+
+        grid_charge = schedule.loc[current_hour, "GridCharge"]
+        current_grid_charge = self.grid_charge_enabled()
+        if grid_charge != current_grid_charge:
+            log.info(
+                "Changing grid charge from %s to %s",
+                current_grid_charge,
+                grid_charge,
+            )
+            self.set_grid_charge(grid_charge)
+        else:
+            log.info("Grid charge remains unchanged at %s", current_grid_charge)
 
 
-bm = BatteryManager()
+prices = ElectricityPrices()
+inverter = GrowattInverterController()
+manager = bess.BatteryManager()
+schedule = None
+
+columns_to_print = [
+    "StartTime",
+    "EndTime",
+    "ElectricityPrice",
+    "State",
+    "GrowattState",
+    "Battery SOE",
+    "Charge",
+    "Discharge",
+    "Discharge Power Rate",
+    "GridCharge",
+]
 
 
-@time_trigger("startup")  # noqa: F821
+@time_trigger("startup")
 def run_on_startup():
     """Run automatically on startup or reload."""
     file_save_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log.info("BatteryManager initializing, version: %s", file_save_date)  # noqa: F821
-    scheduler()
+    log.info("BatteryManager initializing, version: %s", file_save_date)
+    run_midnight_task()
+    run_hourly_task()
 
 
-@time_trigger("cron(*/1 * * * *)")  # noqa: F821
-def scheduler():
-    """Run automatically once on startup or reload and then every 5 minutes."""
-    bm.fetch_electricity_prices()
-    bm.fetch_battery_settings()
-    bm.fetch_predicted_consumption()
-    bm.print_status()
-    bm.update_grid_charge_schedule()
+def run_midnight_task():
+    """Run automatically at midnight to update the TOU settings."""
+    log.info("Running midnight task")
 
-    if bm.is_arbitrage_profitable():
-        bm.enable_discharge_schedule(True)
-    else:
-        bm.enable_discharge_schedule(False)
-
-    if not bm.battery_scheduling_enabled:
-        log.info("Scheduling disabled")  # noqa: F821
-        return
-
-    # Fetch current hour
-    local_tz = ZoneInfo("Europe/Stockholm")  # Replace with your local timezone
-    current_time = datetime.datetime.now(local_tz)
-    current_hour = current_time.strftime("%H")
-
-    current_soc = int(state.get("sensor.rkm0d7n04x_state_of_charge_soc"))  # noqa: F821
-    current_discharge_stop_soc = int(state.get("number.rkm0d7n04x_discharge_stop_soc"))  # noqa: F821
-
-    target_discharge_stop_soc = int(
-        float(state.get(f"input_number.discharge_stop_soc_{current_hour}"))  # noqa: F821
+    electricity_prices = prices.get_electricity_prices()
+    manager.set_electricity_prices(electricity_prices)
+    charging_power_rate = inverter.get_charging_power_rate()
+    manager.set_prediction_data(
+        estimated_consumption_per_hour_kwh=3.5,
+        max_charging_power_rate=charging_power_rate,
     )
+    global schedule
+    schedule = manager.calculate_schedule()
+    bess.print_to_terminal(schedule, columns_to_print)
+    growatt_TOU_schedule = bess.get_growatt_time_schedule(schedule)
+    inverter.set_TOU_settings(growatt_TOU_schedule)
+    bess.print_to_terminal(growatt_TOU_schedule, columns_to_print)
 
-    log.info(  # noqa: F821
-        "\nCurrent hour:                    %2d\n"
-        "Current SOC:                    %3d%%\n"
-        "Discharge Stop SOC:             %3d%%\n"
-        "Discharge Target SOC:           %3d%%\n",
-        int(current_hour),
-        int(current_soc),
-        int(current_discharge_stop_soc),
-        int(target_discharge_stop_soc),
-    )
 
-    if target_discharge_stop_soc != current_discharge_stop_soc:
-        log.info("Updating inverter setting:")  # noqa: F821
-        target_discharge_stop_soc = min(
-            target_discharge_stop_soc, bm.charge_stop_soc - 1
-        )
-        log.info(
-            "Adjusted target discharge stop SOC to %3d%% to be lower than charge stop SOC",
-            target_discharge_stop_soc,
-        )
-
-        service.call(  # noqa: F821
-            "number",
-            "set_value",
-            entity_id="number.rkm0d7n04x_discharge_stop_soc",
-            value=target_discharge_stop_soc,
-        )
-        log.info(" - discharge_stop_soc       %2d%%", int(target_discharge_stop_soc))  # noqa: F821
-    else:
-        log.info("Nothing to do, not discharging battery")  # noqa: F821
+@time_trigger("cron(0 * * * *)")
+def run_hourly_task():
+    if datetime.datetime.now().hour == 0:
+        run_midnight_task()
+    """Run automatically every hour to update the grid charge schedule."""
+    log.info("Running hourly task")
+    inverter.print_inverter_status()
+    inverter.set_hourly_settings(schedule)

@@ -7,8 +7,147 @@ import pandas as pd
 
 from .constants import BATTERY_CHARGE_CYCLE_COST_SEK
 
-
 def plot_multiple_graphs(
+    dfs: List[pd.DataFrame], titles: List[str], nrows: int, ncols: int, filename: str
+) -> None:
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 10))
+
+    if nrows == 1 and ncols == 1:
+        axes = [axes]  # Convert single Axes object to a list
+    else:
+        axes = axes.flatten()  # Flatten the 2D array of axes for easy iteration
+
+    for i, (df, title) in enumerate(zip(dfs, titles)):
+        if i >= len(axes):
+            break  # Prevent accessing out of bounds index
+
+        ax = axes[i]
+        minmax = df.copy()
+        minmax.reset_index(inplace=True)
+        min_indexes = minmax[minmax["MinMax"] == "min"].index.tolist()
+        max_indexes = minmax[minmax["MinMax"] == "max"].index.tolist()
+
+        ax.step(
+            df.index,
+            df["ElectricityPrice"],
+            label="Electricity Price (Nordpool)",
+            color="blue",
+            zorder=1,
+            where="post",
+        )
+        ax.step(
+            df.index,
+            df["ElectricityPriceBuy"],
+            label="Electricity Price (Buy)",
+            color="red",
+            zorder=1,
+            where="post",
+            linestyle=":",
+        )
+        ax.scatter(
+            df.index[min_indexes],
+            df["ElectricityPrice"].iloc[min_indexes],
+            color="green",
+            label="Min Price (Nordpool)",
+            zorder=2,
+        )
+        ax.scatter(
+            df.index[max_indexes],
+            df["ElectricityPrice"].iloc[max_indexes],
+            color="red",
+            label="Max Price (Nordpool)",
+            zorder=2,
+        )
+
+        profit = df["Earning"].sum().round(2)
+
+        charge_label = 0
+        discharge_label = 0
+
+        for j in range(len(df["State"])):
+            if df["State"].iloc[j] == "charging":
+                if charge_label == 0:
+                    ax.fill_between(
+                        df.index[j : j + 2],
+                        df["ElectricityPriceBuy"].iloc[j],
+                        df["ElectricityPriceBuy"].iloc[j]
+                        + BATTERY_CHARGE_CYCLE_COST_SEK,
+                        label="Battery Charge Cycle Cost",
+                        color="grey",
+                        alpha=0.3,
+                        zorder=0,
+                    )
+                    ax.fill_between(
+                        df.index[j : j + 2],
+                        0,
+                        df["ElectricityPriceBuy"].iloc[j],
+                        label="Charging (Buy Price)",
+                        color="red",
+                        alpha=0.3,
+                        zorder=0,
+                    )
+                    charge_label = 1
+                else:
+                    ax.fill_between(
+                        df.index[j : j + 2],
+                        df["ElectricityPriceBuy"].iloc[j],
+                        df["ElectricityPriceBuy"].iloc[j]
+                        + BATTERY_CHARGE_CYCLE_COST_SEK,
+                        color="grey",
+                        alpha=0.3,
+                        zorder=0,
+                    )
+                    ax.fill_between(
+                        df.index[j : j + 2],
+                        0,
+                        df["ElectricityPriceBuy"].iloc[j],
+                        color="red",
+                        alpha=0.3,
+                        zorder=0,
+                    )
+            elif df["State"].iloc[j] == "discharging":
+                if discharge_label == 0:
+                    ax.fill_between(
+                        df.index[j : j + 2],
+                        0,
+                        df["ElectricityPriceBuy"].iloc[j],
+                        label="Discharging (Buy Price)",
+                        color="green",
+                        alpha=0.3,
+                        zorder=0,
+                    )
+                    discharge_label = 1
+                else:
+                    ax.fill_between(
+                        df.index[j : j + 2],
+                        0,
+                        df["ElectricityPriceBuy"].iloc[j],
+                        color="green",
+                        alpha=0.3,
+                        zorder=0,
+                    )
+
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H"))
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=1))
+        ax.grid(which="both", axis="x", linestyle="--", linewidth=0.5)
+
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Electricity Price (SEK / kWh)")
+        ax.legend()
+
+    #        ax.set_title(
+    #            f"{title}, Profit: {profit} SEK",
+    #            bbox=dict(facecolor="yellow", alpha=0.5),
+    #           pad=10,
+    #      )
+
+    plt.tight_layout()
+    plt.savefig(f"{filename}.svg", format="svg")
+    plt.show()
+    plt.close(fig)
+
+
+def plot_multiple_graphs_old(
     dfs: List[pd.DataFrame], titles: List[str], nrows: int, ncols: int, filename: str
 ) -> None:
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 10))
@@ -343,18 +482,20 @@ def get_histogram_of_monthly_spreads(df_electricity_price):
 def print_to_terminal(df, columns_to_print):
     columns = [col for col in columns_to_print if col in df.columns]
     print(df[columns].round(3))
-    profit = df["Earning"].sum().round(2)
-    print(f"Profit {profit}  SEK")
+
+
+#    profit = df["Earning"].sum().round(2)
+#    print(f"Profit {profit}  SEK")
 
 
 def print_to_excel(df, columns_to_print, filename):
-    if not filename.endswith('.xlsx'):
-        filename += '.xlsx'  
-    
+    if not filename.endswith(".xlsx"):
+        filename += ".xlsx"
+
     # Ensure datetimes are timezone-unaware
     df_to_save = df[columns_to_print].copy()
     df_to_save.index = df_to_save.index.tz_localize(None)
-        
+
     # Save to Excel
     with pd.ExcelWriter(filename) as writer:
-        df_to_save.to_excel(writer, sheet_name='Sheet1')
+        df_to_save.to_excel(writer, sheet_name="Sheet1")

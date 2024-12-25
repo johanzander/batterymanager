@@ -64,3 +64,45 @@ def NordpoolPrices():
     df.rename(columns={"value": "ElectricityPrice"}, inplace=True)
 
     return df
+
+
+def NordPoolTestPrices():
+
+    electricity_prices_2024_08_16 = [
+    0.9827,
+    0.8419,
+    0.0321,
+    0.0097,
+    0.0098,
+    0.9136,
+    1.4433,
+    1.5162,
+    1.4029,
+    1.1346,
+    0.8558,
+    0.6485,
+    0.2895,
+    0.1363,
+    0.1253,
+    0.6200,
+    0.8880,
+    1.1662,
+    1.5163,
+    2.5908,
+    2.7325,
+    1.9312,
+    1.5121,
+    1.3056,
+]
+    return pd.DataFrame(
+        {
+            "Timestamp": pd.date_range(
+                start=datetime.datetime.now().replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                ),
+                periods=len(electricity_prices_2024_08_16),
+                freq="h",
+            ),
+            "ElectricityPrice": electricity_prices_2024_08_16,
+        }
+    )

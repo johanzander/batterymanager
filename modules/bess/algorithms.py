@@ -7,8 +7,8 @@ import pandas as pd
 
 from .constants import (
     BATTERY_CHARGE_CYCLE_COST_SEK,
+    BATTERY_MAX_CHARGE_DISCHARGE_RATE_KW,
     BATTERY_STORAGE_SIZE_KWH,
-    MAX_CHARGE_DISCHARGE_RATE_KW,
     MINIMUM_PROFIT_PER_CYCLE,
 )
 
@@ -38,10 +38,11 @@ def bess_algorithm_italian(df: pd.DataFrame) -> pd.DataFrame:
     electricity_price_buy = df["ElectricityPriceBuy"].values
     electricity_price_sell = df["ElectricityPriceSell"].values
 
-    # Initialize arrays to store charge/discharge actions and battery state of charge
-    df["Battery State of Charge"] = np.zeros(len(df))
-    df["Electricity Bought"] = np.zeros(len(df))
-    df["Electricity Sold"] = np.zeros(len(df))
+    # Initialize arrays to store charge/discharge actions and Battery SOC
+    df["Battery SOC"] = np.zeros(len(df))
+    df["Charge"] = np.zeros(len(df))
+    df["Discharge"] = np.zeros(len(df))
+    df["Profitable"] = np.zeros(len(df))
     df["Earning"] = np.zeros(len(df))
     df["State"] = ["standby"] * len(df)
 
@@ -127,16 +128,18 @@ def bess_algorithm_italian(df: pd.DataFrame) -> pd.DataFrame:
     def charge_battery(hour: int) -> None:
         """Charge the battery at the specified hour."""
         charge_amount = min(
-            MAX_CHARGE_DISCHARGE_RATE_KW,
-            BATTERY_STORAGE_SIZE_KWH - df.at[hour, "Battery State of Charge"],
+            BATTERY_MAX_CHARGE_DISCHARGE_RATE_KW,
+            BATTERY_STORAGE_SIZE_KWH - df.at[hour, "Battery SOC"],
         )
         if charge_amount > 0:
             charge_amount = min(
-                MAX_CHARGE_DISCHARGE_RATE_KW,
-                BATTERY_STORAGE_SIZE_KWH - df.at[hour, "Battery State of Charge"],
+                BATTERY_MAX_CHARGE_DISCHARGE_RATE_KW,
+                BATTERY_STORAGE_SIZE_KWH - df.at[hour, "Battery SOC"],
             )
-            df.at[hour, "Electricity Bought"] = charge_amount
-            df.loc[hour:, "Battery State of Charge"] += charge_amount
+
+            df.at[hour, "Charge"] = charge_amount
+            for h in range(hour, len(df)):
+                df.at[h, "Battery SOC"] += charge_amount
             df.at[hour, "Earning"] = -charge_amount * df.at[hour, "ElectricityPriceBuy"]
             df.at[hour, "State"] = "charging"
         else:
@@ -145,11 +148,12 @@ def bess_algorithm_italian(df: pd.DataFrame) -> pd.DataFrame:
     def discharge_battery(hour: int) -> None:
         """Discharge the battery at the specified hour."""
         discharge_amount = min(
-            MAX_CHARGE_DISCHARGE_RATE_KW, df.at[hour, "Battery State of Charge"]
+            BATTERY_MAX_CHARGE_DISCHARGE_RATE_KW, df.at[hour, "Battery SOC"]
         )
         if discharge_amount > 0:
-            df.at[hour, "Electricity Sold"] = discharge_amount
-            df.loc[hour:, "Battery State of Charge"] -= discharge_amount
+            df.at[hour, "Discharge"] = discharge_amount
+            for h in range(hour, len(df)):
+                df.at[h, "Battery SOC"] -= discharge_amount
             battery_wear_costs = discharge_amount * BATTERY_CHARGE_CYCLE_COST_SEK
             df.at[hour, "Earning"] = (
                 discharge_amount * df.at[hour, "ElectricityPriceSell"]
@@ -320,6 +324,8 @@ def bess_algorithm_italian(df: pd.DataFrame) -> pd.DataFrame:
     # Iterate over the content and call charge_battery(cheap) and discharge_battery(high)
     for cheap_hour, expensive_hour in zip(second_cheapest_hours, second_highest_hours):
         if interval_is_profitable(cheap_hour, expensive_hour):
+            for hour in range(cheap_hour, expensive_hour + 1):
+                df.at[hour, "Profitable"] = 1
             charge_battery(cheap_hour)
             discharge_battery(expensive_hour)
 
