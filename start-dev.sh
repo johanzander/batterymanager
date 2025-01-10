@@ -1,0 +1,6 @@
+# start-dev.sh
+#!/bin/bash
+echo "Killing any existing uvicorn processes..."
+pkill -f uvicorn
+echo "Starting uvicorn..."
+PYTHONPATH=/workspaces/batterymanager uvicorn backend.api:app --reload --port 8000
