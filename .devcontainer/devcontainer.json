@@ -12,12 +12,13 @@
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "pip3 install --user -r requirements_test.txt",
+	"postCreateCommand": "/bin/bash .devcontainer/setup.sh",
 	"customizations": {
 		"vscode": {
 			"extensions": [
 				"GitHub.copilot",
-				"ms-python.debugpy"
+				"ms-python.debugpy",
+				"ms-python.python"
 			]
 		}
 	},

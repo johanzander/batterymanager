@@ -5,8 +5,8 @@ from typing import Optional
 import logging
 
 from .nordpool2 import fetch_nordpool_prices
-from modules.bess.bess import BatteryManager
-from modules.bess.schedule import Schedule
+from core.bess.bess import BatteryManager
+from core.bess.schedule import Schedule
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

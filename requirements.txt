@@ -1,7 +1,0 @@
-pandas
-matplotlib
-fastapi
-uvicorn
-pydantic
-numpy
-pytest
