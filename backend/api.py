@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import logging
 
-from .nordpool2 import fetch_nordpool_prices
+from nordpool2 import fetch_nordpool_prices
 from core.bess.bess import BatteryManager
 from core.bess.schedule import Schedule
 
@@ -36,23 +36,6 @@ async def get_prices():
     prices = fetch_nordpool_prices()
     return {"prices": prices}
 
-@app.get("/api/schedule/current")
-async def get_current_schedule():
-    """Get the current battery schedule."""
-    try:
-        schedule = battery_manager.get_schedule()
-        return {
-            "schedule": {
-                "intervals": schedule.get_daily_intervals(),
-                "total_charged_kwh": schedule.optimization_results.get("total_charged_kwh", 0),
-                "total_discharged_kwh": schedule.optimization_results.get("total_discharged_kwh", 0),
-                "cost_savings": schedule.optimization_results.get("cost_savings", 0),
-            }
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/schedule/optimize")
 async def optimize_schedule(
@@ -89,25 +72,7 @@ async def optimize_schedule(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/schedule/hourly/{hour}")
-async def get_hourly_settings(hour: int):
-    """Get settings for a specific hour."""
-    try:
-        if hour < 0 or hour > 23:
-            raise HTTPException(status_code=400, detail="Hour must be between 0 and 23")
-            
-        schedule = battery_manager.get_schedule()
-        settings = schedule.get_hour_settings(hour)
-        
-        return {
-            "hour": hour,
-            "settings": settings
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.get("/api/battery/schedule-data")
 async def get_schedule_data(
     estimated_consumption: float = Query(4.5, ge=0, le=15),
@@ -116,7 +81,6 @@ async def get_schedule_data(
     """Get battery schedule data for dashboard."""
     try:
         prices = fetch_nordpool_prices()
-        
         # Configure battery manager
         battery_manager.set_electricity_prices(prices)
         battery_manager.set_prediction_data(
@@ -130,13 +94,17 @@ async def get_schedule_data(
         
         # Create hourly data from optimization results
         hourly_data = []
-        for hour, costs in enumerate(result["hourly_costs"]):
+        for hour in range(len(prices)):
             hourly_data.append({
                 "hour": f"{hour:02d}:00",
                 "price": float(prices[hour]["price"]),
                 "batteryLevel": float(result["state_of_energy"][hour]),
                 "action": float(result["actions"][hour]),
-                "gridUsed": float(4.5 + max(0, result["actions"][hour]))  # Base consumption + charging
+                "gridCost": float(result["hourly_costs"][hour]["grid_cost"]),
+                "batteryCost": float(result["hourly_costs"][hour]["battery_cost"]),
+                "totalCost": float(result["hourly_costs"][hour]["total_cost"]),
+                "baseCost": float(result["hourly_costs"][hour]["base_cost"]),
+                "savings": float(result["hourly_costs"][hour]["savings"])
             })
 
         # Calculate battery cycles (charging events)

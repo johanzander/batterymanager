@@ -8,6 +8,7 @@ import numpy as np
 from .algorithms import optimize_battery
 from .schedule import Schedule
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Battery constants
@@ -86,6 +87,7 @@ class BatteryManager:
 
         # Run optimization
         result = optimize_battery(
+#            prices=self.electricity_price_buy,
             prices=self.electricity_price_nordpool,
             total_capacity=BATTERY_STORAGE_SIZE_KWH,
             reserved_capacity=self.battery_min_capacity_kwh,
@@ -129,9 +131,6 @@ class BatteryManager:
 ║ Estimated Hourly Consumption     ║ {self.estimated_consumption_per_hour_kwh:>12.1f} kWh ║
 ╚══════════════════════════════════╩══════════════════╝\n"""
         logger.info(config)
-
-    def print_schedule(self) -> None:
-        self._log_battery_schedule()
 
     def _log_battery_schedule(self) -> None:
         """Print the current battery schedule."""

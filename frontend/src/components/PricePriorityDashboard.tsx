@@ -5,13 +5,18 @@ import {
 } from 'recharts';
 import BatterySettings from './BatterySettings';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 interface HourlyData {
   hour: string;
   price: number;
   batteryLevel: number;
   action: number;
-  gridUsed: number;
+  gridCost: number;
+  batteryCost: number;
+  totalCost: number;
+  baseCost: number;
+  savings: number;
 }
 
 interface ScheduleSummary {
@@ -30,7 +35,7 @@ export default function PricePriorityDashboard() {
   const [data, setData] = useState<ScheduleData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [settings, setSettings] = useState<BatterySettings>({
+  const [settings, setSettings] = useState({
     estimatedConsumption: 4.5,
     maxChargingPowerRate: 100,
   });
@@ -43,7 +48,7 @@ export default function PricePriorityDashboard() {
         max_charging_power_rate: settings.maxChargingPowerRate.toString(),
       });
 
-      const response = await fetch(`/api/battery/schedule-data?${queryParams}`);
+      const response = await fetch(`${API_BASE_URL}/api/battery/schedule-data?${queryParams}`);
       if (!response.ok) throw new Error('Failed to fetch data');
       const scheduleData = await response.json();
       setData(scheduleData);
@@ -59,7 +64,7 @@ export default function PricePriorityDashboard() {
     fetchScheduleData();
   }, [fetchScheduleData]);
 
-  const handleSettingsUpdate = (newSettings: BatterySettings) => {
+  const handleSettingsUpdate = (newSettings: typeof settings) => {
     setSettings(newSettings);
   };
 
@@ -180,44 +185,31 @@ export default function PricePriorityDashboard() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th rowSpan={2} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
                 Hour
               </th>
-              <th colSpan={3} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border bg-blue-50">
-                Base Case
-              </th>
-              <th colSpan={6} className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-                Optimized Case
-              </th>
-            </tr>
-            <tr className="bg-gray-50">
-              {/* Base Case Headers */}
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-blue-50">
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
                 Price (SEK/kWh)
               </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-blue-50">
-                Cons. (kWh)
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
+                Base Cost (SEK)
               </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-blue-50">
-                Cost (SEK)
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
+                Battery Level (kWh)
               </th>
-              {/* Optimized Case Headers */}
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-                SOE (kWh)
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
+                Action (kWh)
               </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-                Charge (kWh)
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
+                Grid Cost (SEK)
               </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
-                Import Cost (SEK)
-              </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
                 Battery Cost (SEK)
               </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
                 Total Cost (SEK)
               </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border bg-green-50">
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border">
                 Savings (SEK)
               </th>
             </tr>
@@ -228,17 +220,12 @@ export default function PricePriorityDashboard() {
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                   {hour.hour}
                 </td>
-                {/* Base Case Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                   {hour.price.toFixed(3)}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {settings.estimatedConsumption.toFixed(1)}
+                  {hour.baseCost.toFixed(2)}
                 </td>
-                <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {(hour.price * settings.estimatedConsumption).toFixed(2)}
-                </td>
-                {/* Optimized Case Data */}
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                   {hour.batteryLevel.toFixed(1)}
                 </td>
@@ -254,26 +241,20 @@ export default function PricePriorityDashboard() {
                   </span>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {hour.gridUsed ? (hour.gridUsed * hour.price).toFixed(2) : "0.00"}
+                  {hour.gridCost.toFixed(2)}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {hour.action > 0 ? (hour.action * 0.5).toFixed(2) : "0.00"}
+                  {hour.batteryCost.toFixed(2)}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {(
-                    (hour.gridUsed * hour.price) +
-                    (hour.action > 0 ? hour.action * 0.5 : 0)
-                  ).toFixed(2)}
+                  {hour.totalCost.toFixed(2)}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                  {(
-                    (hour.price * settings.estimatedConsumption) -
-                    ((hour.gridUsed * hour.price) +
-                      (hour.action > 0 ? hour.action * 0.5 : 0))
-                  ).toFixed(2)}
+                  {hour.savings.toFixed(2)}
                 </td>
               </tr>
             ))}
+
             {/* Totals Row */}
             <tr className="bg-gray-100 font-semibold">
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
@@ -284,15 +265,10 @@ export default function PricePriorityDashboard() {
                 {(hourlyData.reduce((sum, h) => sum + h.price, 0) / hourlyData.length).toFixed(3)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                {/* Total consumption */}
-                {(24 * settings.estimatedConsumption).toFixed(1)}
-              </td>
-              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                 {summary.baseCost.toFixed(2)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                 {/* Average battery level */}
-                {(hourlyData.reduce((sum, h) => sum + h.batteryLevel, 0) / hourlyData.length).toFixed(1)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                 C: {hourlyData.reduce((sum, h) => sum + (h.action > 0 ? h.action : 0), 0).toFixed(1)}
@@ -300,10 +276,10 @@ export default function PricePriorityDashboard() {
                 D: {Math.abs(hourlyData.reduce((sum, h) => sum + (h.action < 0 ? h.action : 0), 0)).toFixed(1)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                {hourlyData.reduce((sum, h) => sum + (h.gridUsed * h.price), 0).toFixed(2)}
+                {hourlyData.reduce((sum, h) => sum + h.gridCost, 0).toFixed(2)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
-                {hourlyData.reduce((sum, h) => sum + (h.action > 0 ? h.action * 0.5 : 0), 0).toFixed(2)}
+                {hourlyData.reduce((sum, h) => sum + h.batteryCost, 0).toFixed(2)}
               </td>
               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border">
                 {summary.optimizedCost.toFixed(2)}
@@ -312,6 +288,7 @@ export default function PricePriorityDashboard() {
                 {summary.savings.toFixed(2)}
               </td>
             </tr>
+
           </tbody>
         </table>
       </div>

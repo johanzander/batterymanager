@@ -1,4 +1,6 @@
 .DS_Store
 **/__pycache__/
 **/*.pyc
-node_modules/
+.google_cloud_sdk/
+frontend/node_modules/
+frontend/dist/

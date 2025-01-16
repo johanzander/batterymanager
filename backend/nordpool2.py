@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from nordpool import elspot
 from zoneinfo import ZoneInfo
 
-from modules.bess.electricityprices import calculate_prices
+from core.bess.electricityprices import calculate_prices
 
 def fetch_nordpool_prices(area: str = "SE4", currency: str = "SEK") -> list[dict]:
     """Fetch electricity prices for today and tomorrow for a specified area.

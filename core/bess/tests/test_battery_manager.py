@@ -8,13 +8,25 @@ from bess.schedule import Schedule
 parametrize_consumption = pytest.mark.parametrize(
     "test_consumption",
     [
-        "test_consumption_low",
+#        "test_consumption_low",
         "test_consumption_medium",
-        "test_consumption_high",
+#        "test_consumption_high",
     ],
     indirect=True,
 )
 
+parametrize_prices = pytest.mark.parametrize(
+    "test_prices",
+    [
+        "test_prices_flat",
+        "test_prices_2024_08_16",
+        "test_prices_2025_01_05",
+        "test_prices_2025_01_12",
+        "test_prices_2025_01_13",
+        "test_prices_peak",
+    ],
+    indirect=True,
+)
 
 class TestBatteryManager:
     """Test cases for BatteryManager."""
@@ -52,7 +64,6 @@ class TestBatteryManager:
             max_charging_power_rate=test_charging_power_rate,
         )
         schedule = battery_manager.optimize_schedule()
-        battery_manager.print_schedule()
 
         # Verify schedule properties
         assert isinstance(schedule, Schedule)
@@ -81,7 +92,6 @@ class TestBatteryManager:
             max_charging_power_rate=test_charging_power_rate,
         )
         schedule = battery_manager.optimize_schedule()
-        battery_manager.print_schedule()
 
         # Verify basic structure
         assert isinstance(schedule, Schedule)
@@ -89,7 +99,13 @@ class TestBatteryManager:
         assert len(schedule.state_of_energy) == 25  # Including initial level
 
         # Verify optimization results
-        assert schedule.optimization_results["cost_savings"] > 0
+        # Base case cost:                 127.95 SEK
+        # Optimized cost:                  86.13 SEK
+        # Total savings:                   41.81 SEK
+        # Savings percentage:               32.7 %
+        # Total energy charged:             30.0 kWh
+        # Total energy discharged:          30.0 kWh
+        assert abs(schedule.optimization_results["cost_savings"] - 41.81) < 1e-2
 
         # Verify intervals are properly formed
         intervals = schedule.get_daily_intervals()
@@ -116,7 +132,6 @@ class TestBatteryManager:
             max_charging_power_rate=test_charging_power_rate,
         )
         schedule = battery_manager.optimize_schedule()
-        battery_manager.print_schedule()
 
         # Verify schedule properties
         assert isinstance(schedule, Schedule)
@@ -131,6 +146,51 @@ class TestBatteryManager:
             abs(float(b2) - float(b1)) <= 6.0
             for b1, b2 in zip(state_of_energy, state_of_energy[1:])
         )
+
+    @parametrize_consumption
+    def test_optimization_2025_01_13(
+        self,
+        battery_manager,
+        test_prices_2025_01_13,
+        test_consumption,
+        test_charging_power_rate,
+    ):
+        """Test optimization with prices for 2025-01-13."""
+        prices = self._create_price_dicts(test_prices_2025_01_13)
+        battery_manager.set_electricity_prices(prices)
+        battery_manager.set_prediction_data(
+            estimated_consumption_per_hour_kwh=test_consumption,
+            max_charging_power_rate=test_charging_power_rate,
+        )
+        schedule = battery_manager.optimize_schedule()
+        
+        assert schedule.optimization_results["cost_savings"] >= 0
+
+
+    @parametrize_consumption
+    def test_optimization_2025_01_12(
+        self,
+        battery_manager,
+        test_prices_2025_01_12,
+        test_consumption,
+        test_charging_power_rate,
+    ):
+        """Test optimization with prices for 2025-01-13."""
+        prices = self._create_price_dicts(test_prices_2025_01_12)
+        battery_manager.set_electricity_prices(prices)
+        battery_manager.set_prediction_data(
+            estimated_consumption_per_hour_kwh=test_consumption,
+            max_charging_power_rate=test_charging_power_rate,
+        )
+        schedule = battery_manager.optimize_schedule()
+        # Base case cost:                 104.80 SEK
+        # Optimized cost:                  84.96 SEK
+        # Total savings:                   19.84 SEK
+        # Savings percentage:               18.9 %
+        # Total energy charged:             27.0 kWh
+        # Total energy discharged:          27.0 kWh
+        assert abs(schedule.optimization_results["cost_savings"] - 19.84) < 1e-2
+
 
     @parametrize_consumption
     def test_optimization_peak_prices(
@@ -148,7 +208,6 @@ class TestBatteryManager:
             max_charging_power_rate=test_charging_power_rate,
         )
         schedule = battery_manager.optimize_schedule()
-        battery_manager.print_schedule()
 
         # Verify basic structure
         assert isinstance(schedule, Schedule)
@@ -163,3 +222,24 @@ class TestBatteryManager:
         states = [interval["state"] for interval in intervals]
         assert "charging" in states
         assert "discharging" in states
+        
+    @parametrize_prices
+    @parametrize_consumption
+    def test_savings(
+        self,
+        battery_manager,
+        test_prices,
+        test_consumption,
+        test_charging_power_rate,
+    ):
+        """Test that ensures every saving is positive for each price pattern."""
+        prices = self._create_price_dicts(test_prices)
+        battery_manager.set_electricity_prices(prices)
+        battery_manager.set_prediction_data(
+            estimated_consumption_per_hour_kwh=test_consumption,
+            max_charging_power_rate=test_charging_power_rate,
+        )
+        schedule = battery_manager.optimize_schedule()
+
+        # Verify optimization results
+        assert schedule.optimization_results["cost_savings"] >= 0

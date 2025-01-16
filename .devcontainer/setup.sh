@@ -25,3 +25,6 @@ npm install
 cd /workspaces/batterymanager/backend
 pip install --upgrade pip
 pip3 install --user -r requirements.txt
+
+cd /workspaces/batterymanager/core
+pip3 install --user -r requirements.txt

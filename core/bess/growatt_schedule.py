@@ -148,6 +148,10 @@ class GrowattScheduleManager:
         if not self.current_schedule:
             return {"grid_charge": False, "discharge_rate": 0}
 
+        # special case where we only have one 'battery-first' interval, let's force charge
+#        if len(self.detailed_intervals) == 1 and self.detailed_intervals[0]["batt_mode"] == "battery-first":
+#            return {"grid_charge": True, "discharge_rate": 0}
+
         settings = self.current_schedule.get_hour_settings(hour)
         return {
             "grid_charge": settings["state"] == "charging",

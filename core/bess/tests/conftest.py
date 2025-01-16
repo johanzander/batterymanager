@@ -145,7 +145,66 @@ def test_prices_2025_01_05():
         0.400,
     ]
 
+@pytest.fixture
+def test_prices_2025_01_12():
+    """Return Nordpool prices for given date."""
+    return [
+        0.357,
+        0.301,
+        0.289,
+        0.349,
+        0.393,
+        0.405,
+        0.412,
+        0.418,
+        0.447,
+        0.605,
+        0.791,
+        0.919,
+        0.826,
+        0.779,
+        1.066,
+        1.332,
+        1.492,
+        1.583,
+        1.677,
+        1.612,
+        1.514,
+        1.277,
+        0.829,
+        0.481,
+    ]
 
+@pytest.fixture
+def test_prices_2025_01_13():
+    """Return Nordpool prices for given date."""
+    return [
+        0.477,
+        0.447,
+        0.450,
+        0.438,
+        0.433,
+        0.422,
+        0.434,
+        0.805,
+        1.180,
+        0.654,
+        0.454,
+        0.441,
+        0.433,
+        0.425,
+        0.410,
+        0.399,
+        0.402,
+        0.401,
+        0.379,
+        0.347,
+        0.067,
+        0.023,
+        0.018,
+        0.000,
+    ]
+    
 @pytest.fixture
 def test_consumption(request):
     """Provide the requested test consumption."""
