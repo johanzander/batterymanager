@@ -220,3 +220,33 @@ class HomeAssistantController:
                 end_time="23:59",
                 enabled=False,
             )
+
+    def get_nordpool_prices_today(self) -> list[float]:
+        """Get today's Nordpool prices from Home Assistant sensor.
+        
+        Returns:
+            List of hourly prices for today (24 values)
+        """
+        try:
+            prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.today")
+            if not prices:
+                raise ValueError("No prices available from Nordpool sensor")
+            return prices
+        except Exception as e:
+            log.error("Error getting today's Nordpool prices: %s", str(e))
+            return []
+
+    def get_nordpool_prices_tomorrow(self) -> list[float]:
+        """Get tomorrow's Nordpool prices from Home Assistant sensor.
+        
+        Returns:
+            List of hourly prices for tomorrow (24 values)
+        """
+        try:
+            prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow")
+            if not prices:
+                raise ValueError("No prices available for tomorrow yet")
+            return prices
+        except Exception as e:
+            log.error("Error getting tomorrow's Nordpool prices: %s", str(e))
+            return []

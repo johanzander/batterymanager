@@ -6,6 +6,7 @@ import bess
 
 # Initialize components
 controller = bess.HomeAssistantController()
+price_manager = bess.ElectricityPriceManager(bess.HANordpoolSource(controller))
 battery_manager = bess.BatteryManager()
 growatt_schedule = bess.GrowattScheduleManager()
 
@@ -32,31 +33,20 @@ def dry_run():
     """Show the schedule for today and tomorrow, but don't update any settings."""
 
     log.info("\n -= Todays schedule =- ")
-    nordpool_prices = sensor.nordpool_kwh_se4_sek_2_10_025.today
-    if not nordpool_prices:
-        log.warning("No prices available from Nordpool sensor")
-        return
-
-    # Remove VAT from prices
-    nordpool_prices_ex_vat = [float(price) / 1.25 for price in nordpool_prices]
-    electricity_prices = bess.add_timestamps_and_prices(nordpool_prices_ex_vat)
+    electricity_prices_today = price_manager.get_today_prices()
 
     # Configure battery manager
-    battery_manager.set_electricity_prices(electricity_prices)
+    battery_manager.set_electricity_prices(electricity_prices_today)
     optimize_schedule()
 
     log.info("\n -= Tomorrows schedule =- ")
-    nordpool_prices = sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow
-    if not nordpool_prices:
-        log.warning("No prices available for tomorrow yet")
+    electricity_prices_tomorrow = price_manager.get_tomorrow_prices()
+    if not electricity_prices_tomorrow:
+        log.warning("No prices available for tomorrow")
         return
 
-    # Remove VAT from prices
-    nordpool_prices_ex_vat = [float(price) / 1.25 for price in nordpool_prices]
-    electricity_prices = bess.add_timestamps_and_prices(nordpool_prices_ex_vat)
-
     # Configure battery manager
-    battery_manager.set_electricity_prices(electricity_prices)
+    battery_manager.set_electricity_prices(electricity_prices_tomorrow)
     optimize_schedule()
 
 
@@ -81,16 +71,13 @@ def run_prepare_next_days_daily_schedule() -> None:
     log.info("Preparing next day's schedule")
 
     try:
-        nordpool_prices = sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow
-        if not nordpool_prices:
+        # Fetch electricity prices for tomorrow
+        electricity_prices = price_manager.get_tomorrow_prices()
+        if not electricity_prices:
             log.warning("No prices available from Nordpool sensor")
             return
 
-        # Remove VAT from prices
-        nordpool_prices_ex_vat = [float(price) / 1.25 for price in nordpool_prices]
-        electricity_prices = bess.add_timestamps_and_prices(nordpool_prices_ex_vat)
-
-        # Configure battery manager
+        # Set prices for battery manager
         battery_manager.set_electricity_prices(electricity_prices)
 
         optimize_schedule()
@@ -115,20 +102,13 @@ def run_prepare_next_days_daily_schedule() -> None:
 
 
 def run_prepare_todays_daily_schedule() -> None:
-    """Run at 23:55 to update TOU settings for next day."""
-    log.info("Preparing next day's schedule")
+    """Run to prepare TOU settings for current day."""
+    log.info("Preparing  today's schedule")
 
     try:
-        nordpool_prices = sensor.nordpool_kwh_se4_sek_2_10_025.today
-        if not nordpool_prices:
-            log.warning("No prices available from Nordpool sensor")
-            return
+        electricity_prices = price_manager.get_today_prices()
 
-        # Remove VAT from prices
-        nordpool_prices_ex_vat = [float(price) / 1.25 for price in nordpool_prices]
-        electricity_prices = bess.add_timestamps_and_prices(nordpool_prices_ex_vat)
-
-        # Configure battery manager
+        # Set prices for battery manager
         battery_manager.set_electricity_prices(electricity_prices)
 
         optimize_schedule()
@@ -149,7 +129,7 @@ def run_prepare_todays_daily_schedule() -> None:
                     enabled=True,
                 )
     except Exception as e:
-        log.error("Error preparing next day's schedule: %s", e)
+        log.error("Error preparing todays's schedule: %s", e)
 
 
 @time_trigger("cron(0 * * * *)")

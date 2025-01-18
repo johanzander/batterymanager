@@ -36,6 +36,7 @@ Key Features:
 
 Limitations:
 - Does not support potential export to grid profits
+- Same hourly consumption rate for all hours
 
 System Parameters (configurable):
 - Battery Capacity:
@@ -158,7 +159,7 @@ def optimize_battery(prices, total_capacity=30, reserved_capacity=3,
                         energy_to_discharge -= secondary_discharge
                         logger.debug(f"Secondary discharge planned: {secondary_discharge} at hour {secondary_trade.discharge_hour}")
 
-        # KEY CHANGE: Execute if we found a place for majority of charge
+        # Execute if we found a place for majority of charge
         total_discharge = sum(amount for _, amount in discharge_plan)
         if len(discharge_plan) > 0 and total_discharge >= charge_amount * 0.8:  # At least 80% can be discharged
             # Apply charge
@@ -206,8 +207,11 @@ def optimize_battery(prices, total_capacity=30, reserved_capacity=3,
         })
 
     # Calculate total costs
-    base_cost = sum(hour["base_cost"] for hour in hourly_costs)
-    optimized_cost = sum(hour["total_cost"] for hour in hourly_costs)
+    base_cost = 0
+    optimized_cost = 0
+    for hour in hourly_costs:
+        base_cost += hour["base_cost"]
+        optimized_cost += hour["total_cost"]
 
     return {
         "state_of_energy": state_of_energy,

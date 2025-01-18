@@ -1,4 +1,4 @@
-// src/types.ts
+
 export interface PriceData {
     timestamp: string;
     price: number;
@@ -12,6 +12,10 @@ export interface PriceData {
     batteryLevel: number;
     action: number;
     gridUsed: number;
+    gridCost: number;     
+    batteryCost: number; 
+    totalCost: number;   
+    savings: number;
   }
   
   export interface ScheduleSummary {
@@ -19,6 +23,8 @@ export interface PriceData {
     optimizedCost: number;
     savings: number;
     cycleCount: number;
+    gridCosts: number;    
+    batteryCosts: number;
   }
   
   export interface ScheduleData {

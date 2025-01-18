@@ -3,7 +3,7 @@
 from datetime import datetime
 import pytest
 
-from bess.bess import BatteryManager
+from bess.battery_manager import BatteryManager
 from bess.growatt_schedule import GrowattScheduleManager
 from bess.schedule import Schedule
 
@@ -28,8 +28,8 @@ class TestGrowattScheduleManager:
             {
                 "timestamp": (base_time.replace(hour=i)).strftime("%Y-%m-%d %H:%M"),
                 "price": p,
-                "buy_price": p * 1.25,
-                "sell_price": p * 0.8,
+                "buyPrice": p * 1.25,
+                "sellPrice": p * 0.8,
             }
             for i, p in enumerate(prices)
         ]

@@ -8,10 +8,9 @@ import numpy as np
 from .algorithms import optimize_battery
 from .schedule import Schedule
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Battery constants
+# Default battery constants
 BATTERY_STORAGE_SIZE_KWH = 30.0
 BATTERY_MIN_SOC = 10
 BATTERY_MAX_SOC = 100
@@ -36,18 +35,53 @@ class BatteryManager:
         self.schedule: Schedule | None = None
 
         # Battery parameters
+        self.total_capacity = BATTERY_STORAGE_SIZE_KWH
+        self.reserved_capacity = BATTERY_MIN_SOC / 100 * BATTERY_STORAGE_SIZE_KWH
         self.estimated_consumption_per_hour_kwh = 0.0
         self.battery_capacity_to_use_kwh = 0.0
         self.battery_min_capacity_kwh = 0.0
         self.max_charging_power_rate = 0.0
         self.charging_power_kw = 0.0
 
+    def set_battery_settings(
+        self,
+        total_capacity: float = BATTERY_STORAGE_SIZE_KWH,
+        reserved_capacity: float = BATTERY_MIN_SOC / 100 * BATTERY_STORAGE_SIZE_KWH,
+        estimated_consumption: float = 0.0,
+        max_charging_power_rate: float = 100.0
+    ) -> None:
+        """Set battery settings."""
+        self.total_capacity = total_capacity
+        self.reserved_capacity = reserved_capacity
+        self.estimated_consumption_per_hour_kwh = estimated_consumption
+        self.max_charging_power_rate = max_charging_power_rate
+
+        # Calculate usable battery capacity
+        self.battery_capacity_to_use_kwh = self.total_capacity - self.reserved_capacity
+        self.battery_min_capacity_kwh = self.reserved_capacity
+
+        # Calculate charging parameters
+        self.charging_power_kw = (
+            self.max_charging_power_rate / 100
+        ) * BATTERY_MAX_CHARGE_DISCHARGE_RATE_KW
+
+        self._log_battery_config()
+        
+    def get_battery_settings(self) -> dict[str, float]:
+        """Get current battery settings."""
+        return {
+            "totalCapacity": self.total_capacity,
+            "reservedCapacity": self.reserved_capacity,
+            "estimatedConsumption": self.estimated_consumption_per_hour_kwh,
+            "maxChargingPowerRate": self.max_charging_power_rate
+        }
+                
     def set_electricity_prices(self, prices: list[dict[str, Any]]) -> None:
         """Set electricity prices from a list of price dictionaries."""
         self.electricity_price_nordpool = np.array([entry["price"] for entry in prices])
-        self.electricity_price_buy = np.array([entry["buy_price"] for entry in prices])
+        self.electricity_price_buy = np.array([entry["buyPrice"] for entry in prices])
         self.electricity_price_sell = np.array(
-            [entry["sell_price"] for entry in prices]
+            [entry["sellPrice"] for entry in prices]
         )
 
         logger.info(
@@ -65,12 +99,8 @@ class BatteryManager:
         self.estimated_consumption_per_hour_kwh = estimated_consumption_per_hour_kwh
 
         # Calculate usable battery capacity
-        self.battery_capacity_to_use_kwh = BATTERY_STORAGE_SIZE_KWH * (
-            1 - BATTERY_MIN_SOC / 100
-        )
-        self.battery_min_capacity_kwh = (
-            BATTERY_STORAGE_SIZE_KWH - self.battery_capacity_to_use_kwh
-        )
+        self.battery_capacity_to_use_kwh = self.total_capacity - self.reserved_capacity
+        self.battery_min_capacity_kwh = self.reserved_capacity
 
         # Calculate charging parameters
         self.max_charging_power_rate = max_charging_power_rate
@@ -79,6 +109,7 @@ class BatteryManager:
         ) * BATTERY_MAX_CHARGE_DISCHARGE_RATE_KW
 
         self._log_battery_config()
+
 
     def optimize_schedule(self) -> Schedule:
         """Calculate optimal battery charge/discharge schedule."""

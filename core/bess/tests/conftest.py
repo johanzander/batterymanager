@@ -2,13 +2,6 @@
 
 import pytest
 
-import bess.electricityprices as ep
-
-
-@pytest.fixture
-def test_prices_nordpool():
-    return ep.fetch_nordpool_prices()
-
 
 @pytest.fixture
 def test_prices_tomorrow():

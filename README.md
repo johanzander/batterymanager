@@ -33,14 +33,10 @@ cd batterymanager
 ## Roadmap
 
 ### Features 
-- Integrate optimized algorithm.
 - Update algorithm to use existing SOH
 - Parameterize battery parameters in frontend
 - Parameterize electricity parameters (Nordpool area) in frontend
 - Use buy electricity prices in UI, not Nordpool
-- Use cookies to remember users settings
-- Add historic electricity prices in UI
-- Add today/tomorrow prices in UI
 - Add proper URL
 - Add Home Assistant Add-On
 - App proper documentation
@@ -50,7 +46,12 @@ cd batterymanager
 
 ### Bugs
 - todays electricity prices do not change to tomorrows at midnight when running Cloud Run
+- HA energy consumption sensor value not working, using fixed value for now
+
+### Verification
 - Hourly settings not set in pyscript.
-
-
+- Integrate optimized algorithm.
+- Use cookies to remember users settings
+- Add historic electricity prices in UI
+- Add today/tomorrow prices in UI
 

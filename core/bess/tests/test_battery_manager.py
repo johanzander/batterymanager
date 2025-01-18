@@ -2,7 +2,7 @@
 
 from datetime import datetime
 import pytest
-from bess.bess import BatteryManager
+from bess.battery_manager import BatteryManager
 from bess.schedule import Schedule
 
 parametrize_consumption = pytest.mark.parametrize(
@@ -42,8 +42,8 @@ class TestBatteryManager:
             {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
                 "price": p,
-                "buy_price": p * 1.25,
-                "sell_price": p * 0.8,
+                "buyPrice": p * 1.25,
+                "sellPrice": p * 0.8,
             }
             for p in prices
         ]
