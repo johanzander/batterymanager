@@ -1,3 +1,22 @@
+export type AreaCode = 'SE1' | 'SE2' | 'SE3' | 'SE4';
+
+export interface BatterySettings {
+  totalCapacity: number;
+  reservedCapacity: number;
+  estimatedConsumption: number;
+  maxChargeDischarge: number;
+  chargeCycleCost: number;
+  chargingPowerRate: number;
+}
+
+export interface ElectricitySettings {
+  useActualPrice: boolean;
+  markupRate: number;
+  vatMultiplier: number;
+  additionalCosts: number;
+  taxReduction: number;
+  area: AreaCode;
+}
 
 export interface PriceData {
     timestamp: string;

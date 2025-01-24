@@ -13,6 +13,7 @@ growatt_schedule = bess.GrowattScheduleManager()
 # Set to True to enable test mode (no actual changes will be made)
 TEST_MODE = True
 
+
 def optimize_schedule():
     """Optimize battery charging schedule based on electricity prices."""
     battery_manager.set_prediction_data(
@@ -60,9 +61,10 @@ def run_on_startup() -> None:
     log.info("Running in %s mode", "TEST" if TEST_MODE else "NORMAL")
 
     dry_run()
-    run_prepare_todays_daily_schedule()
-#    growatt_schedule._log_growatt_schedule()
-    run_hourly_task()
+
+
+#    run_prepare_todays_daily_schedule()
+#    run_hourly_task()
 
 
 @time_trigger("cron(55 23 * * *)")
@@ -143,12 +145,20 @@ def run_hourly_task() -> None:
     hourly_settings = growatt_schedule.get_hourly_settings(current_hour)
     grid_charge_enabled = bool(hourly_settings["grid_charge"])
     discharge_rate = int(hourly_settings["discharge_rate"])
-    log.info("Hourly settings for %s: grid_charge=%s, discharge_rate=%d", current_hour, grid_charge_enabled, discharge_rate)
+    log.info(
+        "Hourly settings for %s: grid_charge=%s, discharge_rate=%d",
+        current_hour,
+        grid_charge_enabled,
+        discharge_rate,
+    )
 
     if current_hour < 5 or current_hour >= 0:
-    # check if we should force charge the battery during night, despite arbitrage not profitable
+        # check if we should force charge the battery during night, despite arbitrage not profitable
         TOU_settings = growatt_schedule.get_daily_TOU_settings()
-        if len(TOU_settings) == 1 and TOU_settings[0].get('batt_mode') == 'battery-first':
+        if (
+            len(TOU_settings) == 1
+            and TOU_settings[0].get("batt_mode") == "battery-first"
+        ):
             log.info("No schedule set, force charging battery")
             grid_charge_enabled = True
 

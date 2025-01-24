@@ -4,3 +4,4 @@
 .google_cloud_sdk/
 frontend/node_modules/
 frontend/dist/
+node_modules/
