@@ -38,16 +38,17 @@ Limitations:
 - Does not support potential export to grid profits
 - Same hourly consumption rate for all hours
 
-System Parameters (configurable):
+Configurabe System Parameters:
 - Battery Capacity:
-    * total_capacity: Maximum battery level (default: 30 kWh)
-    * reserved_capacity: Minimum battery level (default: 3 kWh)
+    * total_capacity: Maximum battery level (kWh)
+    * reserved_capacity: Minimum battery level (kWh)
 - Power Limits:
-    * max_charge_rate: Maximum charging power (default: 6 kWh per hour)
-    * hourly_consumption: Maximum discharge rate, based on home usage (default: 5.2 kWh per hour)
-- Cost Parameters:
-    * cycle_cost: Battery wear cost per kWh charged (default: 0.5 SEK)
-    * min_profit_threshold: Minimum profit required for trade consideration (default: 0.2 SEK/kWh)
+    * max_charge_rate: Maximum charging power (kW)
+- Home Energy Consumption:
+    * hourly_consumption: Maximum discharge rate, based on home usage (kWh)
+- Cost/Profit Parameters:
+    * cycle_cost: Battery wear cost per kWh charged (SEK)
+    * min_profit_threshold: Minimum profit required per kWh for charge/discharge consideration
 
 Constraints:
 - Chronological order: Can only discharge after charging
@@ -55,7 +56,6 @@ Constraints:
 - State management: Battery level must always stay between reserved_capacity and total_capacity
 - Profitable trades: Each executed trade must have positive profit after cycle costs
 - Consumption limit: Cannot discharge more than hourly_consumption in any hour
-
 
 Usage:
 The optimize_battery function takes hourly prices and system parameters, returning a schedule
@@ -82,7 +82,7 @@ def create_trade(
     }
 
 
-def find_profitable_trades(prices, cycle_cost=0.5, min_profit_threshold=0.2):
+def find_profitable_trades(prices, cycle_cost, min_profit_threshold):
     """Find all profitable trades keeping chronological order."""
     n_hours = len(prices)
     profitable_trades = []
@@ -118,23 +118,25 @@ def find_profitable_trades(prices, cycle_cost=0.5, min_profit_threshold=0.2):
 
 def optimize_battery(
     prices,
-    total_capacity=30,
-    reserved_capacity=3,
-    cycle_cost=0.5,
-    hourly_consumption=5.2,
-    max_charge_rate=6,
-):
+    total_capacity,
+    reserved_capacity,
+    cycle_cost,
+    hourly_consumption,
+    max_charge_rate,
+    min_profit_threshold
+) -> dict:
     """Battery optimization using max charge rate with split discharges."""
+
     n_hours = len(prices)
-    # Initialize arrays with loops instead of list comprehension
+    # Initialize arrays with loops instead of list comprehensions (not supported in pyscrip)
     state_of_energy = []
     actions = []
     for _ in range(n_hours + 1):
-        state_of_energy.append(reserved_capacity)  # noqa: PERF401 (need to run in pyscript)
+        state_of_energy.append(reserved_capacity)  # noqa: PERF401 
     for _ in range(n_hours):
-        actions.append(0)  # noqa: PERF401 (need to run in pyscript)
+        actions.append(0)  # noqa: PERF401
 
-    trades = find_profitable_trades(prices, cycle_cost)
+    trades = find_profitable_trades(prices, cycle_cost, min_profit_threshold)
     logger.debug("Found profitable trades:")
     for trade in trades:
         logger.debug(

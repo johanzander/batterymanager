@@ -1,7 +1,6 @@
 import React from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { HourlyData } from '../types';
-import { BatterySettings } from './BatterySettings';
+import { HourlyData, BatterySettings } from '../types';
 
 interface BatteryLevelChartProps {
   hourlyData: HourlyData[];
@@ -11,7 +10,7 @@ interface BatteryLevelChartProps {
 export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData, settings }) => {
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <h2 className="text-xl font-semibold mb-4">Price and Battery Level</h2>
+        <h2 className="text-xl font-semibold mb-4">Battery Level and Electricity Price</h2>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={hourlyData}>

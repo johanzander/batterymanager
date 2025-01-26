@@ -3,6 +3,7 @@ import OptimizationDashboard from './pages/OptimizationDashboard';
 import DateSelector from './components/DateSelector';
 import { CombinedSettings } from './components/Settings';
 import { useSettings } from './hooks/useSettings';
+import { BatterySettings, ElectricitySettings } from './types';
 
 function App() {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -20,10 +21,11 @@ function App() {
     setSelectedDate(date);
   };
 
-  const combinedSettings = useMemo(() => ({
-    ...batterySettings,
-    ...electricitySettings,
-  }), [batterySettings, electricitySettings]);
+
+  const settings = useMemo(() => ({
+    ...batterySettings!,
+    ...electricitySettings!
+}) as const satisfies BatterySettings & ElectricitySettings, [batterySettings, electricitySettings]);
 
   if (settingsLoading) {
     return <div>Loading settings...</div>;
@@ -40,7 +42,7 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white shadow fixed top-0 left-0 w-full z-10">
-        <div className="max-w-7xl mx-auto py-3 px-4">
+        <div className="max-w-7xl mx-auto py-2 px-14">
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-4">
               <CombinedSettings
@@ -54,19 +56,21 @@ function App() {
                 Turn electricity price differences into savings with your home battery
               </span>
             </div>
-            <DateSelector
-              selectedDate={selectedDate}
-              onDateChange={handleDateChange}
-              isLoading={isLoading}
-            />
+            <div className="flex items-center space-x-4">
+              <DateSelector
+                selectedDate={selectedDate}
+                onDateChange={handleDateChange}
+                isLoading={isLoading}
+              />
+            </div>
           </div>
         </div>
       </header>
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 mt-20">
+      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8 mt-24">
         <OptimizationDashboard 
           selectedDate={selectedDate} 
           onLoadingChange={setIsLoading}
-          settings={combinedSettings}
+          settings={settings}
         />
       </main>
     </div>

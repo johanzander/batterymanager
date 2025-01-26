@@ -2,10 +2,14 @@
 
 import logging
 
+from .savings_calculator import HourlyResult, SavingsCalculator
+
 logger = logging.getLogger(__name__)
 
 
-def create_interval(start_time, end_time, state, action, state_of_energy):
+def create_interval(
+    start_time: str, end_time: str, state: str, action: float, state_of_energy: float
+) -> dict:
     """Create an interval dictionary with all required fields."""
     return {
         "start_time": start_time,
@@ -21,17 +25,49 @@ class Schedule:
 
     def __init__(self):
         """Initialize schedule state."""
-        self.timestamps = []
-        self.actions = []
-        self.state_of_energy = []
-        self.intervals = []
-        self.optimization_results = {}
+        self.actions: list[float] = []
+        self.state_of_energy: list[float] = []
+        self.intervals: list[dict] = []
+        self.hourly_results: list[HourlyResult] = []
+        self.calc: SavingsCalculator = None
+        self.optimization_results = None
 
-    def set_optimization_results(self, actions, state_of_energy, results):
-        """Set optimization results and create hourly intervals."""
+    def set_optimization_results(
+        self,
+        actions: list[float],
+        state_of_energy: list[float],
+        prices: list[float],
+        cycle_cost: float,
+        hourly_consumption: float,
+    ):
+        """Set optimization results and calculate costs."""
         self.actions = [float(action) for action in actions]
         self.state_of_energy = [float(level) for level in state_of_energy]
-        self.optimization_results = results
+
+        self.calc = SavingsCalculator(cycle_cost, hourly_consumption)
+        self.hourly_results = self.calc.calculate_hourly_results(
+            prices=prices, actions=self.actions, battery_levels=self.state_of_energy
+        )
+
+        schedule_data = self.calc.format_schedule_data(self.hourly_results)
+        self.optimization_results = {
+            "actions": self.actions,
+            "state_of_energy": self.state_of_energy,
+            "base_cost": schedule_data["summary"]["baseCost"],
+            "optimized_cost": schedule_data["summary"]["optimizedCost"],
+            "cost_savings": schedule_data["summary"]["savings"],
+            "hourly_costs": [
+                {
+                    "base_cost": r.base_cost,
+                    "grid_cost": r.grid_cost,
+                    "battery_cost": r.battery_cost,
+                    "total_cost": r.total_cost,
+                    "savings": r.savings,
+                }
+                for r in self.hourly_results
+            ],
+        }
+
         self._create_hourly_intervals()
 
     def _create_hourly_intervals(self):
@@ -51,7 +87,7 @@ class Schedule:
             for hour in range(len(self.actions))
         ]
 
-    def get_hour_settings(self, hour):
+    def get_hour_settings(self, hour: int) -> dict:
         """Get settings for a specific hour."""
         if hour < 0 or hour >= len(self.intervals):
             return {
@@ -67,34 +103,14 @@ class Schedule:
             "state_of_energy": self.intervals[hour]["state_of_energy"],
         }
 
-    def get_daily_intervals(self):
+    def get_daily_intervals(self) -> list[dict]:
         """Get all hourly intervals for the day."""
         return self.intervals
 
-    def _log_schedule(self):
-        """Print current schedule in formatted table."""
-        if not self.intervals:
-            logger.warning("No schedule has been calculated yet")
-            return
-
-        lines = [
-            "\nBattery Schedule (Hourly Intervals):",
-            "═" * 80,
-            "{:<10} {:<10} {:<12} {:<10} {:<12}".format(
-                "StartTime", "EndTime", "State", "Action", "BattLevel"
-            ),
-            "─" * 80,
-        ]
-
-        def format_interval(i):
-            return "{:<10} {:<10} {:<12} {:<10.2f} {:<12.1f}".format(
-                i["start_time"],
-                i["end_time"],
-                i["state"],
-                i["action"],
-                i["state_of_energy"],
+    def get_schedule_data(self) -> dict:
+        """Get complete schedule data."""
+        if not self.calc or not self.hourly_results:
+            raise ValueError(
+                "Schedule not fully initialized - missing cost calculations"
             )
-
-        lines.extend(format_interval(interval) for interval in self.intervals)
-        lines.append("═" * 80)
-        logger.info("\n".join(lines))
+        return self.calc.format_schedule_data(self.hourly_results)

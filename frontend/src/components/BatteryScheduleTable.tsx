@@ -1,7 +1,5 @@
-// src/components/battery/BatteryScheduleTable.tsx
 import React from 'react';
-import { HourlyData, ScheduleSummary } from '../types';
-import { BatterySettings } from './BatterySettings';
+import { HourlyData, ScheduleSummary, BatterySettings } from '../types';
 
 interface BatteryScheduleTableProps {
   hourlyData: HourlyData[];

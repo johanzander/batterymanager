@@ -34,13 +34,12 @@ cd batterymanager
 
 ### Features 
 - Update algorithm to use existing SOH
-- Parameterize battery parameters in frontend
-- Use buy electricity prices in UI, not Nordpool
 - Add proper URL
 - Add Home Assistant Add-On
 - App proper documentation
 - Contribute Home Assistant Growatt Custom Component
 - Add Growatt Schedule view in frontent
+- Add report view with monthly savings summary
 
 ### Bugs
 - todays electricity prices do not change to tomorrows at midnight when running Cloud Run
@@ -48,4 +47,5 @@ cd batterymanager
 
 ### Verification
 - Hourly settings not set in pyscript.
+- Use buy electricity prices in UI, not Nordpool
 

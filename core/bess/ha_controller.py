@@ -223,7 +223,7 @@ class HomeAssistantController:
 
     def get_nordpool_prices_today(self) -> list[float]:
         """Get today's Nordpool prices from Home Assistant sensor.
-        
+
         Returns:
             List of hourly prices for today (24 values)
         """
@@ -238,7 +238,7 @@ class HomeAssistantController:
 
     def get_nordpool_prices_tomorrow(self) -> list[float]:
         """Get tomorrow's Nordpool prices from Home Assistant sensor.
-        
+
         Returns:
             List of hourly prices for tomorrow (24 values)
         """

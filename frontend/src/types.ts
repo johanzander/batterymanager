@@ -7,10 +7,10 @@ export interface BatterySettings {
   maxChargeDischarge: number;
   chargeCycleCost: number;
   chargingPowerRate: number;
+  useActualPrice: boolean;
 }
 
 export interface ElectricitySettings {
-  useActualPrice: boolean;
   markupRate: number;
   vatMultiplier: number;
   additionalCosts: number;

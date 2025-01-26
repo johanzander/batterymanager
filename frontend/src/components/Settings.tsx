@@ -6,26 +6,9 @@ import { Input } from "../components/ui/input";
 import { Switch } from "../components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Button } from "../components/ui/button";
+import { BatterySettings, ElectricitySettings } from '../types';
 
 type AreaCode = 'SE1' | 'SE2' | 'SE3' | 'SE4';
-
-interface BatterySettings {
-  totalCapacity: number;
-  reservedCapacity: number;
-  estimatedConsumption: number;
-  maxChargeDischarge: number;
-  chargeCycleCost: number;
-  chargingPowerRate: number;
-}
-
-interface ElectricitySettings {
-  useActualPrice: boolean;
-  area: AreaCode;
-  markupRate: number;
-  vatMultiplier: number;
-  additionalCosts: number;
-  taxReduction: number;
-}
 
 interface CombinedSettingsProps {
   batterySettings: BatterySettings;
@@ -44,6 +27,7 @@ export function CombinedSettings({
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   
   const [localBatteryValues, setLocalBatteryValues] = useState(() => ({
+    useActualPrice: batterySettings.useActualPrice,
     totalCapacity: batterySettings.totalCapacity.toString(),
     reservedCapacity: batterySettings.reservedCapacity.toString(),
     estimatedConsumption: batterySettings.estimatedConsumption.toString(),
@@ -114,7 +98,7 @@ export function CombinedSettings({
     setLocalValues: React.Dispatch<React.SetStateAction<any>>
   ) => {
     const newValue = e.target.value.replace(',', '.');
-    setLocalValues(prev => ({ ...prev, [field]: newValue }));
+    setLocalValues((prev: any) => ({ ...prev, [field]: newValue }));
     setValidationErrors(prev => ({ ...prev, [field]: '' }));
   };
 
@@ -140,7 +124,7 @@ export function CombinedSettings({
       return;
     }
 
-    setLocalValues(prev => ({
+    setLocalValues((prev: any) => ({
       ...prev,
       [field]: parsed.toString()
     }));
@@ -264,9 +248,9 @@ export function CombinedSettings({
                 <div className="space-y-4">
                   <div className="flex items-center space-x-2 py-2">
                     <Switch
-                      checked={electricitySettings.useActualPrice}
+                      checked={batterySettings.useActualPrice}
                       onCheckedChange={(checked) => 
-                        onElectricityUpdate({...electricitySettings, useActualPrice: checked})}
+                        onBatteryUpdate({...batterySettings, useActualPrice: checked})}
                     />
                     <Label>Use Actual Electricity Price</Label>
                   </div>
@@ -296,7 +280,7 @@ export function CombinedSettings({
                       value={localElectricityValues.markupRate}
                       onChange={(e) => handleInputChange(e, 'markupRate', setLocalElectricityValues)}
                       onBlur={() => handleInputBlur('markupRate', localElectricityValues, electricitySettings, onElectricityUpdate, setLocalElectricityValues)}
-                      disabled={!electricitySettings.useActualPrice}
+                      disabled={!batterySettings.useActualPrice}
                     />
                     {validationErrors.markupRate && (
                       <span className="text-sm text-red-500">{validationErrors.markupRate}</span>
@@ -310,7 +294,7 @@ export function CombinedSettings({
                       value={localElectricityValues.vatMultiplier}
                       onChange={(e) => handleInputChange(e, 'vatMultiplier', setLocalElectricityValues)}
                       onBlur={() => handleInputBlur('vatMultiplier', localElectricityValues, electricitySettings, onElectricityUpdate, setLocalElectricityValues)}
-                      disabled={!electricitySettings.useActualPrice}
+                      disabled={!batterySettings.useActualPrice}
                     />
                     {validationErrors.vatMultiplier && (
                       <span className="text-sm text-red-500">{validationErrors.vatMultiplier}</span>
@@ -324,7 +308,7 @@ export function CombinedSettings({
                       value={localElectricityValues.additionalCosts}
                       onChange={(e) => handleInputChange(e, 'additionalCosts', setLocalElectricityValues)}
                       onBlur={() => handleInputBlur('additionalCosts', localElectricityValues, electricitySettings, onElectricityUpdate, setLocalElectricityValues)}
-                      disabled={!electricitySettings.useActualPrice}
+                      disabled={!batterySettings.useActualPrice}
                     />
                     {validationErrors.additionalCosts && (
                       <span className="text-sm text-red-500">{validationErrors.additionalCosts}</span>
@@ -338,7 +322,7 @@ export function CombinedSettings({
                       value={localElectricityValues.taxReduction}
                       onChange={(e) => handleInputChange(e, 'taxReduction', setLocalElectricityValues)}
                       onBlur={() => handleInputBlur('taxReduction', localElectricityValues, electricitySettings, onElectricityUpdate, setLocalElectricityValues)}
-                      disabled={!electricitySettings.useActualPrice}
+                      disabled={!batterySettings.useActualPrice}
                     />
                     {validationErrors.taxReduction && (
                       <span className="text-sm text-red-500">{validationErrors.taxReduction}</span>
