@@ -1,17 +1,15 @@
+"""FastAPI backend for BESS management."""
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from datetime import datetime
 
-from core.bess.system_config import (
-    BatterySettings,
-    ElectricityPriceSettings,
-)
-from core.bess.battery_manager import BatteryManager
-from core.bess.price_manager import ElectricityPriceManager, NordpoolAPISource
+from core.bess import BatterySystemManager
+from core.bess.price_manager import NordpoolAPISource
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 app = FastAPI()
 
@@ -24,63 +22,97 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create instances
-price_manager = ElectricityPriceManager(NordpoolAPISource())
-battery_manager = BatteryManager()
-
+# Create system manager instance with Nordpool API price source for backend
+system = BatterySystemManager(controller=None, price_source=NordpoolAPISource())
 
 @app.get("/")
 async def root():
     """Health check endpoint."""
     return {"status": "ok"}
 
-
-@app.get("/api/settings/battery", response_model=BatterySettings)
+@app.get("/api/settings/battery")
 async def get_battery_settings():
     """Get current battery settings."""
-    settings_dict = battery_manager.get_settings()
-    return BatterySettings(**settings_dict)
+    try:
+        settings = system.get_settings()
+        # Convert to old format for API compatibility
+        return {
+            "totalCapacity": settings["battery"]["totalCapacity"],
+            "reservedCapacity": settings["battery"]["totalCapacity"] * (settings["battery"]["minSoc"] / 100),
+            "estimatedConsumption": settings["consumption"]["defaultHourly"],
+            "maxChargeDischarge": settings["battery"]["maxChargeRate"],
+            "chargeCycleCost": settings["battery"]["chargeCycleCost"],
+            "chargingPowerRate": settings["battery"]["chargingPowerRate"],
+            "useActualPrice": settings["price"]["useActualPrice"]
+        }
+    except Exception as e:
+        logger.error(f"Error getting battery settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/settings/battery")
-async def update_battery_settings(settings: BatterySettings):
+async def update_battery_settings(settings: dict):
     """Update battery settings."""
     try:
-        battery_manager.update_settings(
-            use_actual_price=settings.useActualPrice,
-            total_capacity=settings.totalCapacity,
-            reserved_capacity=settings.reservedCapacity,
-            estimated_consumption=settings.estimatedConsumption,
-            max_charge_discharge=settings.maxChargeDischarge,
-            charge_cycle_cost=settings.chargeCycleCost,
-            charging_power_rate=settings.chargingPowerRate,
-        )
+        # Convert from old format to new
+        new_settings = {
+            "battery": {
+                "totalCapacity": settings["totalCapacity"],
+                "minSoc": (settings["reservedCapacity"] / settings["totalCapacity"]) * 100,
+                "maxChargeRate": settings["maxChargeDischarge"],
+                "chargeCycleCost": settings["chargeCycleCost"],
+                "chargingPowerRate": settings["chargingPowerRate"]
+            },
+            "consumption": {
+                "defaultHourly": settings["estimatedConsumption"]
+            },
+            "price": {
+                "useActualPrice": settings["useActualPrice"]
+            }
+        }
+        
+        system.update_settings(new_settings)
         return {"message": "Battery settings updated successfully"}
     except Exception as e:
         logger.error(f"Error updating battery settings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/settings/electricity", response_model=ElectricityPriceSettings)
+@app.get("/api/settings/electricity")
 async def get_electricity_price_settings():
     """Get current electricity price settings."""
-    settings_dict = price_manager.get_settings()
-    return ElectricityPriceSettings(**settings_dict)
+    try:
+        settings = system.get_settings()
+        # Convert to old format for API compatibility
+        return {
+            "area": settings["price"]["area"],
+            "markupRate": settings["price"]["markupRate"],
+            "vatMultiplier": settings["price"]["vatMultiplier"],
+            "additionalCosts": settings["price"]["additionalCosts"],
+            "taxReduction": settings["price"]["taxReduction"]
+        }
+    except Exception as e:
+        logger.error(f"Error getting electricity settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/settings/electricity")
-async def update_electricity_price_settings(settings: ElectricityPriceSettings):
+async def update_electricity_price_settings(settings: dict):
     """Update electricity price settings."""
     try:
-        price_manager.update_settings(
-            area=settings.area,
-            markup=settings.markupRate,
-            vat=settings.vatMultiplier,
-            additional_costs=settings.additionalCosts,
-            tax_reduction=settings.taxReduction
-        )
+        # Convert from old format to new
+        new_settings = {
+            "price": {
+                "area": settings["area"],
+                "markupRate": settings["markupRate"],
+                "vatMultiplier": settings["vatMultiplier"],
+                "additionalCosts": settings["additionalCosts"],
+                "taxReduction": settings["taxReduction"]
+            }
+        }
+        
+        system.update_settings(new_settings)
         return {"message": "Electricity settings updated successfully"}
     except Exception as e:
         logger.error(f"Error updating electricity settings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
 
 @app.get("/api/schedule")
 async def get_battery_schedule(
@@ -94,17 +126,10 @@ async def get_battery_schedule(
             else datetime.now().date()
         )
 
-        prices = price_manager.get_prices(target_date)
-        if not prices:
-            logger.warning("No prices available for the selected date.")
-            return []
+        schedule = system.run_optimization(target_date)
 
-        battery_manager.set_electricity_prices(prices)
-        schedule = battery_manager.optimize_schedule()
-        
-        if not schedule:
-            raise ValueError("Failed to create schedule")
-            
         return schedule.get_schedule_data()
+        
     except Exception as e:
+        logger.error(f"Error getting battery schedule: {e}")
         raise HTTPException(status_code=501, detail=str(e))

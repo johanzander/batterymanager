@@ -1,10 +1,10 @@
+# growatt_schedule.py
+
 """Growatt schedule management module for TOU (Time of Use) and hourly controls."""
 
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
 
 def create_detailed_interval(
     segment_id: int,
@@ -26,7 +26,6 @@ def create_detailed_interval(
         "discharge_rate": discharge_rate,
     }
 
-
 def create_tou_interval(
     segment_id: int,
     start_time: str,
@@ -41,12 +40,15 @@ def create_tou_interval(
         "enabled": True,
     }
 
-
 class GrowattScheduleManager:
     """Creates Growatt-specific schedules from generic battery schedule."""
 
     def __init__(self):
-        """Initialize the schedule manager."""
+        """Initialize the schedule manager.
+        
+        Args:
+            battery_settings: Optional battery settings
+        """
         self.max_intervals = 8  # Growatt supports up to 8 TOU intervals
         self.current_schedule = None
         self.detailed_intervals = []  # For overview display
@@ -249,9 +251,11 @@ class GrowattScheduleManager:
         #            return {"grid_charge": True, "discharge_rate": 0}
 
         settings = self.current_schedule.get_hour_settings(hour)
+        discharge_rate = 100 if settings["state"] == "discharging" else 0
+
         return {
             "grid_charge": settings["state"] == "charging",
-            "discharge_rate": 100 if settings["state"] == "discharging" else 0,
+            "discharge_rate": discharge_rate,
         }
 
     def _log_growatt_schedule(self):
@@ -320,9 +324,7 @@ class GrowattScheduleManager:
             return
 
         col_widths = {"segment": 8, "start": 9, "end": 8, "mode": 15, "enabled": 8}
-        total_width = (
-            sum(col_widths.values()) + len(col_widths) - 1
-        )  # -1 for last space
+        total_width = sum(col_widths.values()) + len(col_widths) - 1
 
         header_format = (
             "{:>" + str(col_widths["segment"]) + "} "
@@ -365,7 +367,7 @@ class GrowattScheduleManager:
             logger.warning("No schedule available")
             return
 
-        output = "\n -= Schedule =- \n"
+        output = "\n -= Growatt Hourly Schedule =- \n"
         for h in range(24):
             settings = self.current_schedule.get_hour_settings(h)
             grid_charge_enabled = settings["state"] == "charging"

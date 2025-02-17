@@ -122,33 +122,50 @@ def optimize_battery(
     reserved_capacity,
     cycle_cost,
     hourly_consumption,
-    max_charge_rate,
-    min_profit_threshold
+    max_charge_power,
+    min_profit_threshold,
+    initial_soc=None
 ) -> dict:
     """Battery optimization using max charge rate with split discharges."""
 
     n_hours = len(prices)
-    # Initialize arrays with loops instead of list comprehensions (not supported in pyscrip)
+    if len(hourly_consumption) != n_hours:
+        raise ValueError(f"Expected {n_hours} consumption values, got {len(hourly_consumption)}")
+        
+    # Initialize arrays with current SOC if provided, otherwise use reserved capacity
     state_of_energy = []
-    actions = []
+    initial_energy = (
+        (initial_soc / 100.0 * total_capacity) if initial_soc is not None 
+        else reserved_capacity
+    )
     for _ in range(n_hours + 1):
-        state_of_energy.append(reserved_capacity)  # noqa: PERF401 
-    for _ in range(n_hours):
-        actions.append(0)  # noqa: PERF401
+        state_of_energy.append(initial_energy)
 
+    actions = []
+    for _ in range(n_hours):
+        actions.append(0)
+
+    # Find profitable trades
     trades = find_profitable_trades(prices, cycle_cost, min_profit_threshold)
     logger.debug("Found profitable trades:")
     for trade in trades:
         logger.debug(
-            f"  Trade(c_hour={trade['charge_hour']}, d_hour={trade['discharge_hour']}, profit={trade['profit_per_kwh']:.3f})"
+            f"  Trade(c_hour={trade['charge_hour']}, d_hour={trade['discharge_hour']}, "
+            f"profit={trade['profit_per_kwh']:.3f})"
         )
 
-    # Initialize discharge capacities with a loop
+    # Initialize discharge capacities with hourly values
     discharge_capacities = {}
     for h in range(n_hours):
-        discharge_capacities[h] = hourly_consumption
+        discharge_capacities[h] = hourly_consumption[h]
 
-    energy_for_discharge = total_capacity - reserved_capacity
+    # Calculate available energy for discharge based on current SOC
+    if initial_soc is not None:
+        # Available energy is from current level to max capacity
+        energy_for_discharge = total_capacity - initial_energy
+    else:
+        # If no SOC provided, use maximum possible
+        energy_for_discharge = total_capacity - reserved_capacity
 
     for primary_trade in trades:
         if energy_for_discharge <= 0:
@@ -159,16 +176,16 @@ def optimize_battery(
 
         # Calculate charge amount
         current_soe = state_of_energy[primary_trade["charge_hour"]]
-        charge_amount = min(max_charge_rate, total_capacity - current_soe)
+        charge_amount = min(max_charge_power, total_capacity - current_soe)
 
         if charge_amount <= 0:
             continue
-
+        
         # Find discharge plan
         energy_to_discharge = charge_amount
         discharge_plan = []
 
-        # More flexible primary discharge
+        # Primary discharge - use hour-specific consumption limit
         remaining_capacity = discharge_capacities[primary_trade["discharge_hour"]]
         if remaining_capacity > 0:
             primary_discharge = min(remaining_capacity, energy_to_discharge)
@@ -206,7 +223,7 @@ def optimize_battery(
                             )
                         )
 
-        # Calculate total discharge using a loop
+        # Calculate total discharge
         total_discharge = 0
         for _, amount in discharge_plan:
             total_discharge += amount
@@ -250,13 +267,13 @@ def optimize_battery(
     for hour in range(n_hours):
         current_price = prices[hour]
         action = actions[hour]
-        hour_base_cost = hourly_consumption * current_price
+        hour_base_cost = hourly_consumption[hour] * current_price
 
         if action >= 0:  # Charging or standby
-            grid_cost = (hourly_consumption + action) * current_price
+            grid_cost = (hourly_consumption[hour] + action) * current_price
             battery_cost = action * cycle_cost
         else:  # Discharging
-            grid_cost = max(0, hourly_consumption + action) * current_price
+            grid_cost = max(0, hourly_consumption[hour] + action) * current_price
             battery_cost = 0
 
         total_cost = grid_cost + battery_cost

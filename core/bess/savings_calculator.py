@@ -34,6 +34,7 @@ class HourlyResult:
         return {
             "hour": f"{self.hour:02d}:00",
             "price": self.price,
+            "consumption": self.base_consumption,
             "batteryLevel": self.battery_level,
             "action": self.battery_action,
             "gridCost": self.grid_cost,
@@ -47,7 +48,7 @@ class HourlyResult:
 class SavingsCalculator:
     """Calculates costs and savings for battery schedule."""
 
-    def __init__(self, cycle_cost: float, hourly_consumption: float):
+    def __init__(self, cycle_cost: float, hourly_consumption: list[float]):
         """Init function."""
         self.cycle_cost = cycle_cost
         self.hourly_consumption = hourly_consumption
@@ -64,16 +65,16 @@ class SavingsCalculator:
             battery_level = battery_levels[hour]
 
             # Calculate base case (no battery)
-            base_cost = self.hourly_consumption * price
+            base_cost = self.hourly_consumption[hour] * price
 
             # Calculate with battery
             if action >= 0:  # Charging or standby
-                total_consumption = self.hourly_consumption + action
+                total_consumption = self.hourly_consumption[hour] + action
                 grid_cost = total_consumption * price
                 battery_cost = action * self.cycle_cost
             else:  # Discharging
                 remaining_consumption = (
-                    self.hourly_consumption + action
+                    self.hourly_consumption[hour] + action
                 )  # action is negative
                 grid_cost = remaining_consumption * price
                 battery_cost = 0
@@ -85,7 +86,7 @@ class SavingsCalculator:
                 HourlyResult(
                     hour=hour,
                     price=price,
-                    base_consumption=self.hourly_consumption,
+                    base_consumption=self.hourly_consumption[hour],
                     battery_action=action,
                     battery_level=battery_level,
                     base_cost=base_cost,

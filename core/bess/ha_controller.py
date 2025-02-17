@@ -58,8 +58,13 @@ class HomeAssistantController:
 
     def get_estimated_consumption(self) -> float:
         """Get the estimated hourly consumption in kWh."""
-        return float(state.get("sensor.average_grid_import_power")) / 1000  # noqa: F821
-
+        return float(state.get("sensor.48h_average_grid_import_power")) / 1000  # noqa: F821
+        
+    def get_current_consumption(self) -> float:
+        # TODO: Actually this is not grid import power, but home consumption (i.e. excl. battery, BEV, including solar production)
+        """Get the current hour's grid consumption in kWh."""
+        return float(state.get("sensor.1h_average_grid_import_power"))
+    
     def get_battery_soc(self) -> int:
         """Get the battery state of charge (SOC)."""
         return int(state.get("sensor.rkm0d7n04x_statement_of_charge_soc"))
@@ -123,6 +128,14 @@ class HomeAssistantController:
             value=rate,
             blocking=True,
         )
+
+    def get_battery_charge_power(self) -> float:
+        """Get current battery charging power in watts."""
+        return float(state.get("sensor.rkm0d7n04x_all_batteries_charge_power"))
+
+    def get_battery_discharge_power(self) -> float:
+        """Get current battery discharging power in watts."""
+        return float(state.get("sensor.rkm0d7n04x_all_batteries_discharged_power"))
 
     def battery_scheduling_enabled(self) -> bool:
         """Return True if battery scheduling is enabled."""
@@ -250,3 +263,26 @@ class HomeAssistantController:
         except Exception as e:
             log.error("Error getting tomorrow's Nordpool prices: %s", str(e))
             return []
+
+    def get_l1_current(self) -> float:
+        """Get the current load for L1."""
+        try:
+            return float(state.get("sensor.current_l1_gustavsgatan_32a"))
+        except NameError:
+            return float(state.get("sensor.tibber_pulse_gustavsgatan_32a_current_l1"))
+
+    def get_l2_current(self) -> float:
+        """Get the current load for L2."""
+        try:
+            return float(state.get("sensor.current_l2_gustavsgatan_32a"))
+        except NameError:
+            return float(state.get("sensor.tibber_pulse_gustavsgatan_32a_current_l2"))
+
+    def get_l3_current(self) -> float:
+        """Get the current load for L3."""
+        try:
+            return float(state.get("sensor.current_l3_gustavsgatan_32a"))
+        except NameError:
+            return float(state.get("sensor.tibber_pulse_gustavsgatan_32a_current_l3"))
+    
+    

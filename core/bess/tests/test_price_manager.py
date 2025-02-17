@@ -1,157 +1,169 @@
-"""Test suite for electricity price manager."""
+# tests/test_price_manager.py
 
-import pytest
+"""Tests for electricity price management."""
+
 from datetime import datetime, timedelta, date
-from bess.price_manager import ElectricityPriceManager, NordpoolAPISource, Guru56APISource, HANordpoolSource, MockSource
-import json
+import pytest
+from bess.price_manager import (
+    ElectricityPriceManager,
+    MockSource,
+    HANordpoolSource,
+    NordpoolAPISource,
+    Guru56APISource
+)
 
-class MockHAController:
-    """Mock Home Assistant controller for testing."""
-    
-    def __init__(self, today_prices=None, tomorrow_prices=None, vat=0.25):
-        self.today_prices = today_prices if today_prices else []
-        self.tomorrow_prices = tomorrow_prices if tomorrow_prices else []
-        self.vat = vat
-    
-    def get_nordpool_prices_today(self):
-        return [price * (1 + self.vat) for price in self.today_prices]
-    
-    def get_nordpool_prices_tomorrow(self):
-        return [price * (1 + self.vat) for price in self.tomorrow_prices]
+@pytest.fixture
+def test_prices():
+    """Provide test price data."""
+    return [1.0] * 24  # Flat prices for testing
 
-class TestPriceManager:
-    """Test cases for ElectricityPriceManager."""
+@pytest.fixture
+def mock_source(test_prices):
+    """Provide mock price source."""
+    return MockSource(test_prices)
+
+@pytest.fixture
+def price_manager(mock_source):
+    """Provide configured price manager."""
+    return ElectricityPriceManager(mock_source)
+
+class TestPriceCalculations:
+    """Test price calculation logic."""
     
-    @pytest.fixture
-    def test_prices_flat(self):
-        """Return flat price test data."""
-        return [1.0] * 24
+    def test_basic_calculation(self, price_manager):
+        """Test basic price calculations."""
+        base_price = 1.0
+        result = price_manager.calculate_prices(base_price)
+        
+        # Raw Nordpool price
+        assert abs(result["price"] - base_price) < 1e-6
+        
+        # Full retail price 
+        expected_buy = (
+            (base_price + price_manager.settings.markup_rate) * 
+            price_manager.settings.vat_multiplier + 
+            price_manager.settings.additional_costs
+        )
+        assert abs(result["buyPrice"] - expected_buy) < 1e-6
+        
+        # Sell price
+        expected_sell = base_price + price_manager.settings.tax_reduction
+        assert abs(result["sellPrice"] - expected_sell) < 1e-6
+        
+    def test_actual_price_calculation(self, price_manager):
+        """Test price calculation with use_actual_price=True."""
+        price_manager.settings.use_actual_price = True
+        base_price = 1.0
+        result = price_manager.calculate_prices(base_price)
+        
+        # Should still keep both prices
+        assert abs(result["price"] - base_price) < 1e-6
+        expected_buy = (
+            (base_price + price_manager.settings.markup_rate) * 
+            price_manager.settings.vat_multiplier + 
+            price_manager.settings.additional_costs
+        )
+        assert abs(result["buyPrice"] - expected_buy) < 1e-6
+
+
+class TestPriceRetrieval:
+    """Test price retrieval functionality."""
     
-    @pytest.fixture
-    def test_prices_peak(self):
-        """Return peak price pattern."""
-        return [
-            0.98, 0.84, 0.03, 0.01, 0.01, 0.91,
-            1.44, 1.52, 1.40, 1.13, 0.86, 0.65,
-            0.29, 0.14, 0.13, 0.62, 0.89, 1.17,
-            1.52, 2.59, 2.73, 1.93, 1.51, 1.31,
-        ]
+    def test_get_today_prices(self, price_manager):
+        """Test retrieving today's prices."""
+        prices = price_manager.get_today_prices()
+        
+        assert len(prices) == 24
+        assert all(isinstance(p, dict) for p in prices)
+        assert all("timestamp" in p for p in prices)
+        
+        # Verify timestamps are for today
+        today = datetime.now().date()
+        assert all(datetime.strptime(p["timestamp"], "%Y-%m-%d %H:%M").date() == today 
+                  for p in prices)
+
+    def test_get_tomorrow_prices(self, price_manager):
+        """Test retrieving tomorrow's prices."""
+        prices = price_manager.get_tomorrow_prices()
+        
+        assert len(prices) == 24
+        tomorrow = datetime.now().date() + timedelta(days=1)
+        assert all(datetime.strptime(p["timestamp"], "%Y-%m-%d %H:%M").date() == tomorrow 
+                  for p in prices)
+
+    def test_get_specific_date(self, price_manager):
+        """Test retrieving prices for specific date."""
+        test_date = date(2025, 1, 15)
+        prices = price_manager.get_prices(test_date)
+        
+        assert len(prices) == 24
+        assert all(datetime.strptime(p["timestamp"], "%Y-%m-%d %H:%M").date() == test_date 
+                  for p in prices)
+
+class TestSettingsManagement:
+    """Test settings management."""
     
-    def test_today_prices_flat(self, test_prices_flat):
-        """Test today's prices with flat pricing."""
-        mock_source = MockSource(test_prices_flat)
-        manager = ElectricityPriceManager(mock_source)
+    def test_default_settings(self, price_manager):
+        """Test default settings values."""
+        settings = price_manager.get_settings()
+        
+        assert isinstance(settings, dict)
+        assert "area" in settings
+        assert "markupRate" in settings
+        assert "vatMultiplier" in settings
+        assert "additionalCosts" in settings
+        assert "taxReduction" in settings
+        assert "useActualPrice" in settings
+        assert settings["useActualPrice"] is False
+
+    def test_update_settings(self, price_manager):
+        """Test updating settings."""
+        new_markup = 0.15
+        price_manager.update_settings(markup_rate=new_markup)
+        
+        settings = price_manager.get_settings()
+        assert settings["markupRate"] == new_markup
+
+
+class TestPriceSources:
+    """Test different price sources."""
+    
+    def test_mock_source(self, test_prices):
+        """Test mock source functionality."""
+        source = MockSource(test_prices)
+        manager = ElectricityPriceManager(source)
         
         prices = manager.get_today_prices()
         assert len(prices) == 24
         assert all(p["price"] == 1.0 for p in prices)
-#        assert all(p["buyPrice"] > p["price"] for p in prices)
-#        assert all(p["sellPrice"] > p["price"] for p in prices)
-    # TODO: Fix the above assertions
-    
-    def test_today_prices_peak(self, test_prices_peak):
-        """Test today's prices with peak pricing."""
-        mock_source = MockSource(test_prices_peak)
-        manager = ElectricityPriceManager(mock_source)
+
+    def test_ha_source(self, ha_controller):
+        """Test Home Assistant source."""
+        # ha_controller fixture is already a mock that returns flat prices
+        source = HANordpoolSource(ha_controller)
+        manager = ElectricityPriceManager(source)
         
         prices = manager.get_today_prices()
-        print(f"Today's peak prices: {prices}")  # Debug print
         assert len(prices) == 24
-        assert min(p["price"] for p in prices) == 0.01
-        assert max(p["price"] for p in prices) == 2.73
-    
-    def test_tomorrow_prices(self, test_prices_peak):
-        """Test tomorrow's prices."""
-        mock_source = MockSource(test_prices_peak)
-        manager = ElectricityPriceManager(mock_source)
-        
-        prices = manager.get_tomorrow_prices()
-        print(f"Tomorrow's prices: {prices}")  # Debug print
-        tomorrow = datetime.now().date() + timedelta(days=1)
-        assert len(prices) == 24
-        assert all(datetime.strptime(p["timestamp"], "%Y-%m-%d %H:%M").date() == tomorrow 
-                  for p in prices)
-    
-    def test_specific_date_prices(self, test_prices_peak):
-        """Test getting prices for a specific date."""
-        mock_source = MockSource(test_prices_peak)
-        manager = ElectricityPriceManager(mock_source)
-        
-        test_date = date(2025, 1, 17)
-        prices = manager.get_prices(test_date)
-        print(f"Prices for {test_date}: {prices}")  # Debug print
-        assert len(prices) == 24
-        assert all(datetime.strptime(p["timestamp"], "%Y-%m-%d %H:%M").date() == test_date 
-                  for p in prices)
-    
-    def test_price_config_update(self, test_prices_flat):
-        """Test updating price calculation config."""
-        mock_source = MockSource(test_prices_flat)
-        manager = ElectricityPriceManager(mock_source)
-        
-        # Get prices with default config
-        default_prices = manager.get_today_prices()
-        default_buy_price = default_prices[0]["buyPrice"]
-        
-        # Update config and get new prices
-        manager.update_settings(markup=0.20)  # Increase markup
-        new_prices = manager.get_today_prices()
-        new_buy_price = new_prices[0]["buyPrice"]
-        
-        print(f"Default buy price: {default_buy_price}, New buy price: {new_buy_price}")  # Debug print
-        # assert new_buy_price > default_buy_price
-        # TODO: Fix the above assertion
-        
-    def test_nordpool_source(self):
-        """Test Nordpool source."""
-        nordpool_source = NordpoolAPISource()
-        manager = ElectricityPriceManager(nordpool_source)
-        
-        # Test today's prices
-        today_prices = manager.get_today_prices()
- #       print(f"Nordpool Today's prices: {today_prices}")  # Debug print
-        assert len(today_prices) == 24
-        
-        # Test tomorrow's prices
-        tomorrow_prices = manager.get_tomorrow_prices()
-#        print(f"Nordpool Tomorrow's prices: {tomorrow_prices}")  # Debug print
-        if tomorrow_prices:
-            assert len(tomorrow_prices) == 24
-    
-    def DONT_test_guru56api_source(self): # returns 23 prices instead of 24 for some reason!
-        """Test Guru56API source."""
-        guru56api_source = Guru56APISource()
-        manager = ElectricityPriceManager(guru56api_source)
-        
-        # Test today's prices
-        today_prices = manager.get_today_prices()
- #       print(f"Guru56 Today's prices: {today_prices}")  # Debug print
-        assert len(today_prices) == 24
+        # Verify we get prices
+        assert all(isinstance(p["price"], float) for p in prices)
 
-        # Test tomorrow's prices
-        tomorrow_prices = manager.get_tomorrow_prices()
-#        print(f"Guru56 Tomorrow's prices: {tomorrow_prices}")  # Debug print
-        if tomorrow_prices:
-            assert len(tomorrow_prices) == 24
-    
-    def test_ha_source(self, test_prices_peak):
-        """Test Home Assistant source."""
-        ha_controller = MockHAController(
-            today_prices=test_prices_peak,
-            tomorrow_prices=test_prices_peak,
-            vat=0.25
-        )
-        ha_source = HANordpoolSource(ha_controller)
-        manager = ElectricityPriceManager(ha_source)
+    def test_nordpool_api_source(self):
+        """Test Nordpool API source with invalid date."""
+        source = NordpoolAPISource()
+        manager = ElectricityPriceManager(source)
         
-        # Test today's prices
-        today_prices = manager.get_today_prices()
-        print(f"HA Today's prices: {today_prices}")  # Debug print
-        assert len(today_prices) == 24
-        assert min(p["price"] for p in today_prices) == 0.01
-        assert max(p["price"] for p in today_prices) == 2.73
+        # Using a far future date should raise an error
+        with pytest.raises(ValueError):
+            future_date = date(2050, 1, 1)
+            manager.get_prices(future_date)
+
+    def test_guru_api_source(self):
+        """Test Guru API source with invalid date."""
+        source = Guru56APISource()
+        manager = ElectricityPriceManager(source)
         
-        # Test tomorrow's prices
-        tomorrow_prices = manager.get_tomorrow_prices()
-        print(f"HA Tomorrow's prices: {tomorrow_prices}")  # Debug print
-        assert len(tomorrow_prices) == 24
+        # Using a far future date should raise an error
+        with pytest.raises(ValueError):
+            future_date = date(2050, 1, 1)
+            manager.get_prices(future_date)

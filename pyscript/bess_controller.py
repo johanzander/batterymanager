@@ -1,167 +1,89 @@
+# bess_controller.py
+
 """Home Assistant pyscript Battery Manager for Growatt Inverter/Battery."""
 
 from datetime import datetime
 
-import bess
+from bess import BatterySystemManager, HomeAssistantController
 
-# Initialize components
-controller = bess.HomeAssistantController()
-price_manager = bess.ElectricityPriceManager(bess.HANordpoolSource(controller))
-battery_manager = bess.BatteryManager()
-growatt_schedule = bess.GrowattScheduleManager()
-
-# Set to True to enable test mode (no actual changes will be made)
-TEST_MODE = True
-
-
-def optimize_schedule():
-    """Optimize battery charging schedule based on electricity prices."""
-    battery_manager.set_prediction_data(
-        estimated_consumption_per_hour_kwh=4.5,
-        #        estimated_consumption_per_hour_kwh=controller.get_estimated_consumption(),
-        max_charging_power_rate=controller.get_charging_power_rate(),
-    )
-
-    # Generate and print schedule
-    schedule = battery_manager.optimize_schedule()
-
-    # Apply schedule to Growatt
-    growatt_schedule.apply_schedule(schedule)
-    growatt_schedule.get_daily_TOU_settings()
-
-
-def dry_run():
-    """Show the schedule for today and tomorrow, but don't update any settings."""
-
-    log.info("\n -= Todays schedule =- ")
-    electricity_prices_today = price_manager.get_today_prices()
-
-    # Configure battery manager
-    battery_manager.set_electricity_prices(electricity_prices_today)
-    optimize_schedule()
-
-    log.info("\n -= Tomorrows schedule =- ")
-    electricity_prices_tomorrow = price_manager.get_tomorrow_prices()
-    if not electricity_prices_tomorrow:
-        log.warning("No prices available for tomorrow")
-        return
-
-    # Configure battery manager
-    battery_manager.set_electricity_prices(electricity_prices_tomorrow)
-    optimize_schedule()
+# Initialize system with Home Assistant controller - will automatically use HANordpoolSource
+controller = HomeAssistantController()
+controller.set_test_mode(True) 
+system = BatterySystemManager(controller=controller)
 
 
 @time_trigger("startup")
-def run_on_startup() -> None:
+def run_on_startup():
     """Run automatically on startup or reload."""
-    file_save_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log.info("BatteryManager initializing, version: %s", file_save_date)
-
-    controller.set_test_mode(TEST_MODE)
-    log.info("Running in %s mode", "TEST" if TEST_MODE else "NORMAL")
-
-    dry_run()
-
-
-#    run_prepare_todays_daily_schedule()
-#    run_hourly_task()
-
-
-@time_trigger("cron(55 23 * * *)")
-def run_prepare_next_days_daily_schedule() -> None:
-    """Run at 23:55 to update TOU settings for next day."""
-    log.info("Preparing next day's schedule")
-
     try:
-        # Fetch electricity prices for tomorrow
-        electricity_prices = price_manager.get_tomorrow_prices()
-        if not electricity_prices:
-            log.warning("No prices available from Nordpool sensor")
-            return
+        current_hour = datetime.now().hour
+        log.info("=" * 60)
+        log.info(
+            "BatteryManager startup - %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
 
-        # Set prices for battery manager
-        battery_manager.set_electricity_prices(electricity_prices)
+        # Initial schedule preparation and application
+        schedule = system.prepare_schedule()
+        if schedule:
+            system.apply_schedule(current_hour)
+            system.update_state(current_hour)
+            log.info("Startup sequence completed successfully")
+        else:
+            log.error("Failed to create initial schedule")
 
-        optimize_schedule()
+        log.info("=" * 60)
 
-        TOU_settings = growatt_schedule.get_daily_TOU_settings()
-
-        # Apply TOU settings to inverter
-        controller.disable_all_TOU_settings()
-
-        # Apply battery-first segments
-        for segment in TOU_settings:
-            if segment["enabled"]:
-                controller.set_inverter_time_segment(
-                    segment_id=segment["segment_id"],
-                    batt_mode=segment["batt_mode"],
-                    start_time=segment["start_time"],
-                    end_time=segment["end_time"],
-                    enabled=True,
-                )
     except Exception as e:
-        log.error("Error preparing next day's schedule: %s", e)
-
-
-def run_prepare_todays_daily_schedule() -> None:
-    """Run to prepare TOU settings for current day."""
-    log.info("Preparing  today's schedule")
-
-    try:
-        electricity_prices = price_manager.get_today_prices()
-
-        # Set prices for battery manager
-        battery_manager.set_electricity_prices(electricity_prices)
-
-        optimize_schedule()
-
-        TOU_settings = growatt_schedule.get_daily_TOU_settings()
-
-        # Apply TOU settings to inverter
-        controller.disable_all_TOU_settings()
-
-        # Apply battery-first segments
-        for segment in TOU_settings:
-            if segment["enabled"]:
-                controller.set_inverter_time_segment(
-                    segment_id=segment["segment_id"],
-                    batt_mode=segment["batt_mode"],
-                    start_time=segment["start_time"],
-                    end_time=segment["end_time"],
-                    enabled=True,
-                )
-    except Exception as e:
-        log.error("Error preparing todays's schedule: %s", e)
+        log.error("Error during startup: %s", str(e))
 
 
 @time_trigger("cron(0 * * * *)")
-def run_hourly_task() -> None:
-    """Run every hour to update inverter settings."""
-    log.info("Running hourly task")
+def run_hourly_adaptation():
+    """Run every hour to update predictions and optimize if needed."""
+    try:
+        current_hour = datetime.now().hour
+        log.info("Running hourly adaptation for hour %02d:00", current_hour)
 
-    # Apply hourly settings
-    current_hour = datetime.now().hour
+        # Update state and re-optimize
+        system.update_state(current_hour)
+        schedule = system.prepare_schedule()
+        if schedule:
+            system.apply_schedule(current_hour)
+        else:
+            log.error("Failed to create schedule during hourly adaptation")
 
-    hourly_settings = growatt_schedule.get_hourly_settings(current_hour)
-    grid_charge_enabled = bool(hourly_settings["grid_charge"])
-    discharge_rate = int(hourly_settings["discharge_rate"])
-    log.info(
-        "Hourly settings for %s: grid_charge=%s, discharge_rate=%d",
-        current_hour,
-        grid_charge_enabled,
-        discharge_rate,
-    )
+    except Exception as e:
+        log.error("Error in hourly adaptation: %s", str(e))
 
-    if current_hour < 5 or current_hour >= 0:
-        # check if we should force charge the battery during night, despite arbitrage not profitable
-        TOU_settings = growatt_schedule.get_daily_TOU_settings()
-        if (
-            len(TOU_settings) == 1
-            and TOU_settings[0].get("batt_mode") == "battery-first"
-        ):
-            log.info("No schedule set, force charging battery")
-            grid_charge_enabled = True
 
-    # Configure Growatt inverter hourly settings
-    controller.set_grid_charge(grid_charge_enabled)
-    controller.set_discharging_power_rate(discharge_rate)
+@time_trigger("cron(*/15 * * * *)")
+def run_battery_monitor():
+    """Run every 15 minutes to verify inverter settings match schedule."""
+    try:
+        current_hour = datetime.now().hour
+        system.verify_inverter_settings(current_hour)
+    except Exception as e:
+        log.error("Error in battery monitoring: %s", str(e))
+
+
+@time_trigger("cron(*/5 * * * *)")
+def periodic_power_monitoring():
+    """Monitor power usage and adjust battery charging power to prevent blowing fuses."""
+    try:
+        system.adjust_charging_power()
+    except Exception as e:
+        log.error("Error in power monitoring: %s", str(e))
+
+
+@time_trigger("cron(55 23 * * *)")
+def prepare_next_day():
+    """Prepare schedule for next day at 23:55."""
+    try:
+        log.info("Preparing next day's schedule")
+        success = system.prepare_next_day_schedule()
+        if success:
+            log.info("Next day's schedule set successfully")
+        else:
+            log.warning("Failed to set next day's schedule")
+    except Exception as e:
+        log.error("Error preparing next day's schedule: %s", str(e))
