@@ -3,23 +3,30 @@
 """Simple monitoring of battery system states."""
 
 import logging
-from .settings import HomeSettings, BatterySettings
+
+from .settings import BatterySettings, HomeSettings
 
 logger = logging.getLogger(__name__)
+
 
 class BatteryMonitor:
     """Monitors battery system state consistency."""
 
-    def __init__(self, ha_controller, schedule_manager, 
-                 home_settings: HomeSettings | None = None,
-                 battery_settings: BatterySettings | None = None):
+    def __init__(
+        self,
+        ha_controller,
+        schedule_manager,
+        home_settings: HomeSettings | None = None,
+        battery_settings: BatterySettings | None = None,
+    ) -> None:
         """Initialize the monitor.
-        
+
         Args:
             ha_controller: Home Assistant controller instance
             schedule_manager: Schedule manager instance
             home_settings: Optional home electrical settings
             battery_settings: Optional battery settings
+
         """
         self.controller = ha_controller
         self.schedule_manager = schedule_manager
@@ -31,7 +38,7 @@ class BatteryMonitor:
         self.MAX_SOC = self.battery_settings.max_soc
 
     def check_system_state(self, current_hour: int) -> None:
-        """Check if system states are consistent and log any issues."""
+        """Check if system states are consistent and correct any issues."""
 
         # Get current settings
         hourly_settings = self.schedule_manager.get_hourly_settings(current_hour)
@@ -58,13 +65,16 @@ class BatteryMonitor:
             grid_charge_state,
         )
 
-        # Check if settings match states
+        # Check if settings match states and correct if needed
         if grid_charge_enabled != grid_charge_state:
             logger.warning(
                 "Grid charge state mismatch - Setting: %s, Actual State: %s",
                 grid_charge_enabled,
                 grid_charge_state,
             )
+            # Correct the mismatch by setting the inverter to match the expected state
+            self.controller.set_grid_charge(grid_charge_enabled)
+            logger.info("Corrected grid charge state to: %s", grid_charge_enabled)
 
         # Check charging behavior
         should_be_charging = grid_charge_enabled and soc < self.MAX_SOC

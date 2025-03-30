@@ -126,7 +126,7 @@ async def get_battery_schedule(
             else datetime.now().date()
         )
 
-        schedule = system.run_optimization(target_date)
+        schedule = system.create_schedule(price_date=target_date)
 
         return schedule.get_schedule_data()
         

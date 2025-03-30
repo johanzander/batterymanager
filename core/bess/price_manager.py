@@ -1,5 +1,3 @@
-# price_manager.py
-
 """Electricity price management with configurable sources."""
 
 from datetime import date, datetime, timedelta
@@ -30,10 +28,10 @@ class PriceSource:
         result = []
         base_timestamp = datetime.combine(base_date, datetime.min.time())
 
-        for hour in range(len(prices)):
+        for hour, price in enumerate(prices):
             timestamp = base_timestamp + timedelta(hours=hour)
             price_entry = {"timestamp": timestamp.strftime("%Y-%m-%d %H:%M")}
-            price_entry.update(calculator(prices[hour]))
+            price_entry.update(calculator(price))
             result.append(price_entry)
 
         return result
@@ -42,7 +40,7 @@ class PriceSource:
 class MockSource(PriceSource):
     """Mock price source for testing."""
 
-    def __init__(self, test_prices: list[float]):
+    def __init__(self, test_prices: list[float]) -> None:
         """Initialize with test data."""
         self.test_prices = test_prices
 
@@ -56,7 +54,7 @@ class MockSource(PriceSource):
 class HANordpoolSource(PriceSource):
     """Home Assistant Nordpool sensor price source."""
 
-    def __init__(self, ha_controller):
+    def __init__(self, ha_controller) -> None:
         """Initialize with HA controller."""
         self.ha_controller = ha_controller
 
@@ -77,7 +75,9 @@ class HANordpoolSource(PriceSource):
             raise ValueError(f"No prices available for {target_date or today}")
 
         # Remove VAT from HA prices (they include 25% VAT)
-        prices_no_vat = [float(price) / 1.25 for price in prices]
+        prices_no_vat = []
+        for price in prices:
+            prices_no_vat.append(float(price) / 1.25)  # noqa: PERF401
 
         return self._create_price_list(prices_no_vat, target_date or today, calculator)
 
@@ -85,7 +85,7 @@ class HANordpoolSource(PriceSource):
 class NordpoolAPISource(PriceSource):
     """Nord Pool Group API price source."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize source."""
         self.base_url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices"
 
@@ -110,6 +110,7 @@ class NordpoolAPISource(PriceSource):
                     "Referer": "https://data.nordpoolgroup.com/",
                     "User-Agent": "Mozilla/5.0",
                 },
+                timeout=10,
             )
 
             if response.status_code == 204:
@@ -141,13 +142,13 @@ class NordpoolAPISource(PriceSource):
             return self._create_price_list(prices, target_date, calculator)
 
         except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch prices: {str(e)}")
+            raise RuntimeError(f"Failed to fetch prices: {e!s}") from e
 
 
 class Guru56APISource(PriceSource):
     """Spot56k.guru API price source."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize source."""
         self.base_url = "https://spot.56k.guru/api/v2/hass"
 
@@ -162,11 +163,11 @@ class Guru56APISource(PriceSource):
         params = {"currency": "SEK", "area": area, "multiplier": 1, "decimals": 4}
 
         try:
-            response = requests.get(self.base_url, params=params)
+            response = requests.get(self.base_url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
         except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch prices: {str(e)}")
+            raise RuntimeError(f"Failed to fetch prices: {e!s}") from e
 
         result = []
         for item in data["data"]:
@@ -189,22 +190,23 @@ class Guru56APISource(PriceSource):
 class ElectricityPriceManager:
     """Main interface for electricity price management."""
 
-    def __init__(self, source: PriceSource):
+    def __init__(self, source: PriceSource) -> None:
         """Initialize manager with price source."""
         self.settings = PriceSettings()
         self.source = source
 
     def calculate_prices(self, base_price: float) -> dict[str, float]:
         """Calculate buy and sell prices from base price.
-        
+
         Args:
             base_price: Base Nordpool spot price
-            
+
         Returns:
             Dictionary with:
             - price: Always the raw Nordpool price
             - buyPrice: Full retail price with markup/VAT/costs
             - sellPrice: Price including tax reduction
+
         """
         # Always store raw Nordpool price in price field
         price = base_price
@@ -213,14 +215,14 @@ class ElectricityPriceManager:
         buy_price = (
             base_price + self.settings.markup_rate
         ) * self.settings.vat_multiplier + self.settings.additional_costs
-            
+
         # Calculate sell price with tax reduction
         sell_price = base_price + self.settings.tax_reduction
 
         return {
-            "price": price,            # Raw Nordpool price
-            "buyPrice": buy_price,     # Full retail price
-            "sellPrice": sell_price,   # Price with tax reduction
+            "price": price,  # Raw Nordpool price
+            "buyPrice": buy_price,  # Full retail price
+            "sellPrice": sell_price,  # Price with tax reduction
         }
 
     def get_today_prices(self) -> list[dict[str, Any]]:
@@ -254,3 +256,33 @@ class ElectricityPriceManager:
     def update_settings(self, **kwargs) -> None:
         """Update settings from dictionary."""
         self.settings.update(**kwargs)
+
+    def log_price_information(self, title=None):
+        """Log a formatted table of current price information.
+
+        Args:
+            title: Optional title for the price table
+
+        """
+        try:
+            prices = self.get_today_prices()
+            if not prices:
+                logger.warning("No prices available to log")
+                return
+
+            # Set default title if none provided
+            if title is None:
+                title = "Today's Electricity Prices"
+
+            price_data = f"\n{title}:\n"
+            price_data += "-" * 50 + "\n"
+            price_data += "Hour   | Nordpool Price | Retail Price  | Sell Price\n"
+            price_data += "-" * 50 + "\n"
+
+            for entry in prices:
+                hour = entry.get("timestamp", "").split()[1][:5]  # Extract HH:MM
+                price_data += f"{hour}  | {entry.get('price', 0):.4f} SEK    | {entry.get('buyPrice', 0):.4f} SEK  | {entry.get('sellPrice', 0):.4f} SEK\n"
+
+            logger.info(price_data)
+        except (KeyError, ValueError, AttributeError) as e:
+            logger.warning("Failed to log price information: %s", str(e))

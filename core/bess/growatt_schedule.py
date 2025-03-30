@@ -1,30 +1,10 @@
-# growatt_schedule.py
-
 """Growatt schedule management module for TOU (Time of Use) and hourly controls."""
 
 import logging
 
 logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG)
 
-def create_detailed_interval(
-    segment_id: int,
-    batt_mode: str,
-    start_time: str,
-    end_time: str,
-    enabled: bool,
-    grid_charge: bool,
-    discharge_rate: int,
-) -> dict:
-    """Create a detailed Growatt interval dictionary for overview purposes."""
-    return {
-        "segment_id": segment_id,
-        "batt_mode": batt_mode,
-        "start_time": start_time,
-        "end_time": end_time,
-        "enabled": enabled,
-        "grid_charge": grid_charge,
-        "discharge_rate": discharge_rate,
-    }
 
 def create_tou_interval(
     segment_id: int,
@@ -40,197 +20,379 @@ def create_tou_interval(
         "enabled": True,
     }
 
+
 class GrowattScheduleManager:
     """Creates Growatt-specific schedules from generic battery schedule."""
 
-    def __init__(self):
-        """Initialize the schedule manager.
-        
-        Args:
-            battery_settings: Optional battery settings
-        """
+    def __init__(self) -> None:
+        """Initialize the schedule manager."""
         self.max_intervals = 8  # Growatt supports up to 8 TOU intervals
         self.current_schedule = None
         self.detailed_intervals = []  # For overview display
         self.tou_intervals = []  # For actual TOU settings
+        self.current_hour = 0  # Track current hour
 
-    def apply_schedule(self, schedule):
-        """Convert generic schedule to Growatt-specific intervals."""
-        self.current_schedule = schedule
-        self._consolidate_and_convert()
-        self._log_growatt_schedule()
-        self._log_daily_TOU_settings()
+    def create_schedule(self, schedule, current_hour=0):
+        """Convert generic schedule to Growatt-specific intervals.
 
-    def _consolidate_and_convert(self):
-        """Convert hourly schedule to consolidated Growatt intervals.
+        Args:
+            schedule: Generic battery schedule
+            current_hour: Current hour (0-23) to filter past hours
 
-        This implementation handles several Growatt inverter limitations and quirks:
-
-        1. Wake-up Issue:
-           - The battery can go to sleep during inactive periods
-           - When sleeping, it may not wake up automatically to start charging
-           - To prevent this, we need to add a special 15-min wake-up period (load-first mode)
-             just before any charging period that follows an idle period
-
-        2. Interval Constraints:
-           - Intervals cannot overlap
-           - Each interval must end exactly 1 minute before the next begins
-           - Example sequence:
-             * 00:00-01:44 (battery-first)
-             * 01:45-01:59 (wake-up period)
-             * 02:00-04:59 (charging period)
-
-        3. End of Day Handling:
-           - Last regular interval must end at 23:44
-           - Special load-first idle period from 23:45-23:59 is always added
-
-        4. Interval Management:
-           - Consecutive hours with same behavior are consolidated into single intervals
-           - Wake-up periods are inserted by ending the current interval 15 mins early
-           - Each interval's end time becomes the next interval's start time minus 1 minute
         """
-        if not self.current_schedule or not (
-            hourly_intervals := self.current_schedule.get_daily_intervals()
-        ):
+        self.current_schedule = schedule
+        self.current_hour = current_hour
+        self._consolidate_and_convert()
+
+    #        self._log_growatt_schedule()
+    #        self.log_current_TOU_schedule("KUUUUUUK")
+
+    def initialize_from_tou_segments(self, tou_segments, current_hour=0):
+        """Initialize GrowattScheduleManager with TOU intervals from the inverter.
+
+        Args:
+            tou_segments: List of TOU segments from the inverter
+            current_hour: Current hour (0-23)
+
+        """
+        # Store current hour
+        self.current_hour = current_hour
+
+        # Filter enabled segments
+        active_segments = [
+            segment for segment in tou_segments if segment.get("enabled", False)
+        ]
+
+        if not active_segments:
+            logger.info("No active TOU segments found in inverter")
+            self.tou_intervals = []
             return
 
-        detailed = []
-        start_time = hourly_intervals[0]["start_time"]
+        # Store TOU intervals exactly as they are
+        self.tou_intervals = []
 
-        # Initialize state tracking for the first interval
-        current_action = hourly_intervals[0]["action"]
-        is_charging = current_action > 0
-        is_discharging = current_action < 0
+        for segment in active_segments:
+            # Get segment ID
+            segment_id = segment.get("segment_id")
 
-        # Process all intervals except the last one
-        for hour, next_interval in enumerate(hourly_intervals[1:], 1):
-            next_action = next_interval["action"]
-            next_is_charging = next_action > 0
-            next_is_discharging = next_action < 0
+            # Process the batt_mode value which might be integer or string
+            raw_batt_mode = segment.get("batt_mode")
 
-            # Detect actual behavior changes by comparing:
-            # - Changes in charging state (starting/stopping charging)
-            # - Changes in discharging state (starting/stopping discharging)
-            # - Transitions between active and idle states
-            behavior_changed = (
-                (is_charging != next_is_charging)  # Charging state changed
-                or (is_discharging != next_is_discharging)  # Discharging state changed
-                or (current_action == 0 and next_action != 0)  # Starting activity
-                or (current_action != 0 and next_action == 0)  # Stopping activity
-            )
+            # Convert integer to string representation if needed
+            if isinstance(raw_batt_mode, int):
+                # Map integer values to string modes
+                batt_mode_map = {0: "load-first", 1: "battery-first", 2: "grid-first"}
+                batt_mode = batt_mode_map.get(raw_batt_mode, "battery-first")
+            else:
+                batt_mode = raw_batt_mode
 
-            # Check if we need to add a wake-up period before the next interval
-            needs_wake_up = next_is_charging and not is_charging and hour > 0
-
-            if behavior_changed:
-                # Determine appropriate end time:
-                # - If wake-up needed: end 15 mins early (XX:44)
-                # - If last hour: end at 23:44
-                # - Otherwise: end at normal boundary (XX:59)
-                end_time = (
-                    f"{hour-1:02d}:44"
-                    if needs_wake_up
-                    else "23:44"
-                    if hour == 24
-                    else f"{hour-1:02d}:59"
+            # Only include battery-first intervals
+            if batt_mode == "battery-first":
+                # Create TOU interval with original segment_id
+                self.tou_intervals.append(
+                    {
+                        "segment_id": segment_id,
+                        "batt_mode": "battery-first",
+                        "start_time": segment.get("start_time", "00:00"),
+                        "end_time": segment.get("end_time", "23:59"),
+                        "enabled": True,
+                    }
                 )
 
-                # Add current interval if it has non-zero duration
-                if start_time != end_time[:5]:  # Only add if start != end
-                    detailed.append(
-                        create_detailed_interval(
-                            len(detailed) + 1,
-                            "load-first" if is_discharging else "battery-first",
-                            start_time,
-                            end_time,
-                            True,
-                            is_charging,
-                            100 if is_discharging else 0,
-                        )
-                    )
+        # Sort intervals by start time for logging clarity
+        self.tou_intervals.sort(key=lambda x: x["start_time"])
 
-                # Add wake-up period if transitioning to charging state
-                if needs_wake_up:
-                    detailed.append(
-                        create_detailed_interval(
-                            len(detailed) + 1,
-                            "load-first",
-                            f"{hour-1:02d}:45",
-                            f"{hour-1:02d}:59",
-                            True,
-                            False,  # No grid charge
-                            0,  # No discharge
-                        )
-                    )
-
-                # Start new interval at the hour boundary
-                start_time = next_interval["start_time"]
-
-            # Update state tracking for next iteration
-            current_action = next_action
-            is_charging = next_is_charging
-            is_discharging = next_is_discharging
-
-        # Add final regular interval if not already ending at 23:44
-        if start_time != "23:44":
-            detailed.append(
-                create_detailed_interval(
-                    len(detailed) + 1,
-                    "load-first" if is_discharging else "battery-first",
-                    start_time,
-                    "23:44",
-                    True,
-                    is_charging,
-                    100 if is_discharging else 0,
-                )
-            )
-
-        # Add the mandatory end-of-day idle period (23:45-23:59)
-        detailed.append(
-            create_detailed_interval(
-                len(detailed) + 1,
-                "load-first",
-                "23:45",
-                "23:59",
-                True,
-                False,
-                0,
-            )
+        # Log the TOU settings
+        self.log_current_TOU_schedule(
+            "Creating schedule by reading time segments from inverter"
         )
 
-        self.detailed_intervals = detailed
+    def compare_schedules(self, other_schedule, from_hour=0):
+        """Compare this schedule with another GrowattScheduleManager.
 
-        # Create simplified TOU intervals by consolidating battery-first periods
-        # Note: load-first periods are implicit (any time not covered by battery-first)
-        tou = []
-        current_start = None
+        Args:
+            other_schedule: Another GrowattScheduleManager to compare with
+            from_hour: Hour to start comparison from (defaults to 0)
 
-        for i, interval in enumerate(self.detailed_intervals[:-1]):
-            if interval["batt_mode"] == "battery-first":
-                if current_start is None:
-                    current_start = interval["start_time"]
-            elif current_start is not None:
-                tou.append(
-                    create_tou_interval(
-                        len(tou) + 1,
-                        current_start,
-                        self.detailed_intervals[i - 1]["end_time"],
-                    )
-                )
-                current_start = None
+        Returns:
+            (bool, str): (True if schedules differ, reason for difference)
 
-        # Handle last interval if it was battery-first
-        if current_start is not None:
-            last_regular_interval = self.detailed_intervals[-2]
-            tou.append(
-                create_tou_interval(
-                    len(tou) + 1,
-                    current_start,
-                    last_regular_interval["end_time"],
-                )
+        """
+        # Get TOU settings from both schedules
+        current_tou = self.tou_intervals
+        new_tou = other_schedule.tou_intervals
+
+        # Filter for TOU intervals that affect future hours
+        current_future_tou = [
+            segment
+            for segment in current_tou
+            if int(segment["start_time"].split(":")[0]) >= from_hour
+        ]
+
+        new_future_tou = [
+            segment
+            for segment in new_tou
+            if int(segment["start_time"].split(":")[0]) >= from_hour
+        ]
+
+        # Compare number of intervals
+        logger.debug(
+            "Comparing schedules: current has %d future intervals, new has %d future intervals",
+            len(current_future_tou),
+            len(new_future_tou),
+        )
+
+        if len(current_future_tou) != len(new_future_tou):
+            logger.info(
+                "Schedules differ: current has %d future intervals, new has %d future intervals",
+                len(current_future_tou),
+                len(new_future_tou),
+            )
+            return (
+                True,
+                f"Different number of TOU intervals ({len(current_future_tou)} vs {len(new_future_tou)})",
             )
 
-        self.tou_intervals = tou
+        # Compare TOU intervals
+        for i, current_segment in enumerate(current_future_tou):
+            if i >= len(new_future_tou):
+                return True, "More current TOU intervals than new"
+
+            new_segment = new_future_tou[i]
+
+            # Compare detailed segment properties
+            if current_segment["start_time"] != new_segment["start_time"]:
+                logger.info(
+                    "TOU interval %d start time differs: %s vs %s",
+                    i,
+                    current_segment["start_time"],
+                    new_segment["start_time"],
+                )
+                return (
+                    True,
+                    f"TOU interval {i} start time differs: {current_segment['start_time']} -> {new_segment['start_time']}",
+                )
+
+            if current_segment["end_time"] != new_segment["end_time"]:
+                logger.info(
+                    "TOU interval %d end time differs: %s vs %s",
+                    i,
+                    current_segment["end_time"],
+                    new_segment["end_time"],
+                )
+                return (
+                    True,
+                    f"TOU interval {i} end time differs: {current_segment['end_time']} -> {new_segment['end_time']}",
+                )
+
+            if current_segment["batt_mode"] != new_segment["batt_mode"]:
+                logger.info(
+                    "TOU interval %d battery mode differs: %s vs %s",
+                    i,
+                    current_segment["batt_mode"],
+                    new_segment["batt_mode"],
+                )
+                return (
+                    True,
+                    f"TOU interval {i} battery mode differs: {current_segment['batt_mode']} -> {new_segment['batt_mode']}",
+                )
+
+        # Compare hourly settings for future hours
+        hourly_differences = []
+        for hour in range(from_hour, 24):
+            current_settings = self.get_hourly_settings(hour)
+            new_settings = other_schedule.get_hourly_settings(hour)
+
+            if (
+                current_settings["grid_charge"] != new_settings["grid_charge"]
+                or current_settings["discharge_rate"] != new_settings["discharge_rate"]
+            ):
+                hourly_differences.append(hour)
+                logger.info(
+                    "Hour %d settings differ - grid_charge: %s->%s, discharge_rate: %d->%d",
+                    hour,
+                    current_settings["grid_charge"],
+                    new_settings["grid_charge"],
+                    current_settings["discharge_rate"],
+                    new_settings["discharge_rate"],
+                )
+
+        if hourly_differences:
+            return True, f"Hourly settings differ for hours: {hourly_differences}"
+
+        return False, "Schedules match"
+
+    def _consolidate_and_convert(self):
+        """Convert hourly schedule to consolidated Growatt intervals."""
+        if not self.current_schedule:
+            return
+
+        # Get hourly intervals from schedule
+        hourly_intervals = self.current_schedule.get_daily_intervals()
+        if not hourly_intervals:
+            return
+
+        logger.debug("Starting _consolidate_and_convert at hour %d", self.current_hour)
+
+        # Log current intervals for debugging
+        if hasattr(self, "tou_intervals"):
+            logger.debug("Current TOU intervals before conversion:")
+            for i, interval in enumerate(self.tou_intervals):
+                logger.debug(
+                    "  Interval %d: %s-%s, enabled=%s",
+                    i,
+                    interval["start_time"],
+                    interval["end_time"],
+                    interval["enabled"],
+                )
+
+        # Identify battery-first hours for FUTURE hours only
+        battery_first_hours = []
+
+        for hour in range(24):
+            # Skip past hours completely - we only care about future
+            if hour < self.current_hour:
+                continue
+
+            # Default to battery-first if no data
+            is_battery_first = True
+
+            # Check if we have interval data for this hour
+            for interval in hourly_intervals:
+                interval_hour = int(interval["start_time"].split(":")[0])
+                if interval_hour == hour:
+                    state = interval["state"]
+                    is_battery_first = state not in {"charging", "discharging"}
+                    break
+
+            if is_battery_first:
+                battery_first_hours.append(hour)
+
+        logger.debug("Battery-first hours for future: %s", battery_first_hours)
+
+        # Critical fix: Don't override existing tou_intervals, create a new list
+        # First, directly copy existing intervals
+        old_intervals = []
+        if hasattr(self, "tou_intervals"):
+            old_intervals = self.tou_intervals.copy()
+
+        # Initialize new tou_intervals list
+        self.tou_intervals = []
+
+        # Copy past intervals (completely in the past)
+        for interval in old_intervals:
+            end_hour = int(interval["end_time"].split(":")[0])
+            if end_hour < self.current_hour and interval["enabled"]:
+                logger.debug(
+                    "Keeping past interval: %s-%s",
+                    interval["start_time"],
+                    interval["end_time"],
+                )
+                self.tou_intervals.append(interval.copy())
+
+        logger.debug(
+            "After copying past intervals, tou_intervals has %d intervals",
+            len(self.tou_intervals),
+        )
+
+        # Process future battery-first hours
+        if battery_first_hours:
+            # Process consecutive periods
+            consecutive_periods = []
+            if battery_first_hours:
+                current_period = [battery_first_hours[0]]
+
+                for i in range(1, len(battery_first_hours)):
+                    if battery_first_hours[i] == battery_first_hours[i - 1] + 1:
+                        # Continue current period
+                        current_period.append(battery_first_hours[i])
+                    else:
+                        # Start a new period
+                        consecutive_periods.append(current_period)
+                        current_period = [battery_first_hours[i]]
+
+                # Add the last period
+                consecutive_periods.append(current_period)
+
+            logger.debug("Consecutive periods: %s", consecutive_periods)
+
+            # Find the current active interval (that contains current hour)
+            current_interval = None
+            for interval in old_intervals:
+                if not interval["enabled"]:
+                    continue
+
+                start_hour = int(interval["start_time"].split(":")[0])
+                end_hour = int(interval["end_time"].split(":")[0])
+
+                if start_hour <= self.current_hour <= end_hour:
+                    current_interval = interval
+                    logger.debug(
+                        "Found current interval: %s-%s",
+                        interval["start_time"],
+                        interval["end_time"],
+                    )
+                    break
+
+            # Convert periods to TOU intervals
+            for i, period in enumerate(consecutive_periods):
+                if not period:
+                    continue
+
+                # Use next segment ID
+                next_id = len(self.tou_intervals) + 1
+
+                # Check for current interval
+                segment_id = next_id
+                start_time = f"{period[0]:02d}:00"
+
+                # If period contains current hour and we have a current interval
+                if current_interval and (
+                    self.current_hour in period or period[0] == self.current_hour
+                ):
+                    # Reuse segment ID
+                    segment_id = current_interval["segment_id"]
+
+                    # Use original start time if earlier
+                    start_hour = int(current_interval["start_time"].split(":")[0])
+                    if start_hour < period[0]:
+                        start_time = current_interval["start_time"]
+
+                    logger.debug(
+                        "Adapting current interval: id=%d, start=%s (original=%s-%s)",
+                        segment_id,
+                        start_time,
+                        current_interval["start_time"],
+                        current_interval["end_time"],
+                    )
+
+                logger.debug(
+                    "Creating new interval: id=%d, %s-%s",
+                    segment_id,
+                    start_time,
+                    f"{period[-1]:02d}:59",
+                )
+
+                self.tou_intervals.append(
+                    {
+                        "segment_id": segment_id,
+                        "batt_mode": "battery-first",
+                        "start_time": start_time,
+                        "end_time": f"{period[-1]:02d}:59",
+                        "enabled": True,
+                    }
+                )
+
+        logger.debug("Final tou_intervals count: %d", len(self.tou_intervals))
+
+        # Apply max intervals limit if needed
+        if len(self.tou_intervals) > self.max_intervals:
+            logger.warning(
+                "Too many TOU intervals (%d), truncating to maximum (%d)",
+                len(self.tou_intervals),
+                self.max_intervals,
+            )
+            self.tou_intervals = self.tou_intervals[: self.max_intervals]
 
     def get_daily_TOU_settings(self):
         """Get Growatt-specific TOU settings (battery-first intervals only)."""
@@ -238,17 +400,20 @@ class GrowattScheduleManager:
             return []
 
         # Return only battery-first intervals up to max_intervals
-        return self.tou_intervals[: self.max_intervals]
+        # Ensure segment_id values are sequential from 1
+        result = []
+        for i, interval in enumerate(self.tou_intervals[: self.max_intervals]):
+            # Create a copy to avoid modifying the original
+            segment = interval.copy()
+            segment["segment_id"] = i + 1  # Sequential numbering from 1
+            result.append(segment)
+
+        return result
 
     def get_hourly_settings(self, hour):
         """Get Growatt-specific settings for a given hour."""
         if not self.current_schedule:
             return {"grid_charge": False, "discharge_rate": 0}
-
-        self._log_hourly_settings()
-        # special case where we only have one 'battery-first' interval, let's force charge
-        #        if len(self.detailed_intervals) == 1 and self.detailed_intervals[0]["batt_mode"] == "battery-first":
-        #            return {"grid_charge": True, "discharge_rate": 0}
 
         settings = self.current_schedule.get_hour_settings(hour)
         discharge_rate = 100 if settings["state"] == "discharging" else 0
@@ -317,11 +482,133 @@ class GrowattScheduleManager:
         lines.append("═" * total_width)
         logger.info("\n".join(lines))
 
-    def _log_daily_TOU_settings(self):
+    def log_detailed_schedule(self, header=None):
+        """Log a comprehensive view of the schedule with intervals and actions.
+
+        Args:
+            header: Optional header text to display before the schedule
+        """
+        if header:
+            logger.info(header)
+
+        if not self.current_schedule:
+            logger.info("No schedule available")
+            return
+
+        # First, get all TOU intervals
+        tou_settings = self.get_daily_TOU_settings()
+
+        # Create hour-to-interval mapping
+        hour_intervals = {}
+        for interval in tou_settings:
+            start_hour = int(interval["start_time"].split(":")[0])
+            end_hour = int(interval["end_time"].split(":")[0])
+
+            for hour in range(start_hour, end_hour + 1):
+                hour_intervals[hour] = (
+                    interval["batt_mode"] if interval["enabled"] else "load-first"
+                )
+
+        # Create a table with consolidated intervals based on settings
+        lines = [
+            "Consolidated Schedule:",
+            "╔══════════════╦════════════════╦═════════════╦═══════════════╦════════════╗",
+            "║    Period    ║  Battery Mode  ║ Grid Charge ║ Discharge Rate║   Action   ║",
+            "╠══════════════╬════════════════╬═════════════╬═══════════════╬════════════╣",
+        ]
+
+        # Group hours by their settings
+        consolidated_periods = []
+        current_period = {
+            "start_hour": 0,
+            "batt_mode": hour_intervals.get(0, "load-first"),
+            "settings": self.get_hourly_settings(0),
+        }
+
+        for hour in range(1, 24):
+            batt_mode = hour_intervals.get(hour, "load-first")
+            settings = self.get_hourly_settings(hour)
+
+            # Check if settings have changed
+            if (
+                batt_mode != current_period["batt_mode"]
+                or settings["grid_charge"] != current_period["settings"]["grid_charge"]
+                or settings["discharge_rate"]
+                != current_period["settings"]["discharge_rate"]
+            ):
+                # Save the completed period
+                consolidated_periods.append(
+                    {
+                        "start_hour": current_period["start_hour"],
+                        "end_hour": hour - 1,
+                        "batt_mode": current_period["batt_mode"],
+                        "settings": current_period["settings"],
+                    }
+                )
+
+                # Start a new period
+                current_period = {
+                    "start_hour": hour,
+                    "batt_mode": batt_mode,
+                    "settings": settings,
+                }
+
+        # Add the last period
+        consolidated_periods.append(
+            {
+                "start_hour": current_period["start_hour"],
+                "end_hour": 23,
+                "batt_mode": current_period["batt_mode"],
+                "settings": current_period["settings"],
+            }
+        )
+
+        # Display each consolidated period
+        for period in consolidated_periods:
+            start_hour = period["start_hour"]
+            end_hour = period["end_hour"]
+            batt_mode = period["batt_mode"]
+            grid_charge = period["settings"]["grid_charge"]
+            discharge_rate = period["settings"]["discharge_rate"]
+
+            # Determine action
+            if grid_charge:
+                action = "CHARGE"
+            elif discharge_rate > 0:
+                action = "DISCHARGE"
+            else:
+                action = "IDLE"
+
+            # Mark period containing current hour
+            period_display = f"{start_hour:02d}:00-{end_hour:02d}:59"
+            if start_hour <= self.current_hour <= end_hour:
+                period_display += "*"
+
+            # Format row
+            row = (
+                f"║ {period_display:12} ║"
+                f" {batt_mode:14} ║"
+                f" {str(grid_charge):11} ║"
+                f" {discharge_rate:13} ║"
+                f" {action:10} ║"
+            )
+            lines.append(row)
+
+        lines.append(
+            "╚══════════════╩════════════════╩═════════════╩═══════════════╩════════════╝"
+        )
+        lines.append("* indicates period containing current hour")
+
+        logger.info("\n".join(lines))
+
+    def log_current_TOU_schedule(self, header=None):
         """Log the final simplified TOU settings."""
         daily_settings = self.get_daily_TOU_settings()
         if not daily_settings:
             return
+
+        if not header:
+            header = " -= Growatt TOU Schedule =- "
 
         col_widths = {"segment": 8, "start": 9, "end": 8, "mode": 15, "enabled": 8}
         total_width = sum(col_widths.values()) + len(col_widths) - 1
@@ -335,7 +622,6 @@ class GrowattScheduleManager:
         )
 
         lines = [
-            "\n\nGrowatt TOU Settings:",
             "═" * total_width,
             header_format.format(
                 "Segment",
@@ -357,8 +643,11 @@ class GrowattScheduleManager:
         formatted_settings = [
             setting_format.format(**setting) for setting in daily_settings
         ]
+        if header:
+            lines.insert(0, "\n" + header)
         lines.extend(formatted_settings)
         lines.append("═" * total_width)
+        lines.append("\n")
         logger.info("\n".join(lines))
 
     def _log_hourly_settings(self):

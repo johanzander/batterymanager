@@ -20,10 +20,15 @@ This module is designed to work with the Home Assistant controller and to be run
 """
 
 import logging
-from .settings import HomeSettings, BatterySettings
-from .settings import BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW
+
+from .settings import (
+    BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
+    BatterySettings,
+    HomeSettings,
+)
 
 logger = logging.getLogger(__name__)
+
 
 class HomePowerMonitor:
     """Monitors home power consumption and manages battery charging."""
@@ -34,14 +39,15 @@ class HomePowerMonitor:
         home_settings: HomeSettings | None = None,
         battery_settings: BatterySettings | None = None,
         step_size: int = 5,
-    ):
+    ) -> None:
         """Initialize power monitor.
-        
+
         Args:
             ha_controller: Home Assistant controller instance
             home_settings: Home electrical settings (optional)
             battery_settings: Battery settings (optional)
             step_size: Size of power adjustments in percent (default: 5%)
+
         """
         self.controller = ha_controller
         self.home_settings = home_settings or HomeSettings()
@@ -50,20 +56,28 @@ class HomePowerMonitor:
 
         # Calculate max power per phase with safety margin
         self.max_power_per_phase = (
-            self.home_settings.voltage * 
-            self.home_settings.max_fuse_current * 
-            self.home_settings.safety_margin
+            self.home_settings.voltage
+            * self.home_settings.max_fuse_current
+            * self.home_settings.safety_margin
         )
 
         # Max charging power in watts (convert from kW)
-        self.max_charge_power = BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW * 1000
+        self.max_charge_power_kw = BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW * 1000
 
+        log_message = (
+            "Initialized HomePowerMonitor with:\n"
+            "  Max power per phase: {}W\n"
+            "  Max charging power: {}W\n"
+            "  Max battery charging rate: {}%\n"
+            "  Step size: {}%"
+        )
         logger.info(
-            f"Initialized HomePowerMonitor with:\n"
-            f"  Max power per phase: {self.max_power_per_phase:.0f}W\n"
-            f"  Max charging power: {self.max_charge_power:.0f}W\n"
-            f"  Max battery charging rate: {self.battery_settings.charging_power_rate}%\n"
-            f"  Step size: {self.step_size}%"
+            log_message.format(
+                self.max_power_per_phase,
+                self.max_charge_power_kw,
+                self.battery_settings.charging_power_rate,
+                self.step_size,
+            )
         )
 
     def get_current_phase_loads_w(self):
@@ -95,15 +109,29 @@ class HomePowerMonitor:
         available_pct = 100 - max_load_pct
 
         # Convert to charging power percentage (limit by configured max)
-        charging_power_pct = min(available_pct, float(self.battery_settings.charging_power_rate))
+        charging_power_pct = min(
+            available_pct, float(self.battery_settings.charging_power_rate)
+        )
 
+        log_message = (
+            "Phase loads: #1: %.0fW (%.1f%%), "
+            "#2: %.0fW (%.1f%%), "
+            "#3: %.0fW (%.1f%%)\n"
+            "Most loaded phase: %.1f%%\n"
+            "Available capacity: %.1f%%\n"
+            "Recommended charging: %.1f%%"
+        )
         logger.info(
-            f"Phase loads: #1: {l1:.0f}W ({l1_pct:.1f}%), "
-            f"#2: {l2:.0f}W ({l2_pct:.1f}%), "
-            f"#3: {l3:.0f}W ({l3_pct:.1f}%)\n"
-            f"Most loaded phase: {max_load_pct:.1f}%\n"
-            f"Available capacity: {available_pct:.1f}%\n"
-            f"Recommended charging: {charging_power_pct:.1f}%"
+            log_message,
+            l1,
+            l1_pct,
+            l2,
+            l2_pct,
+            l3,
+            l3_pct,
+            max_load_pct,
+            available_pct,
+            charging_power_pct,
         )
 
         return max(0, charging_power_pct)
@@ -123,7 +151,8 @@ class HomePowerMonitor:
 
         if abs(new_power - current_power) >= self.step_size:
             logger.info(
-                f"Adjusting charging power from {current_power}% to {new_power:.0f}% "
-                f"(target: {target_power:.0f}%)"
+                "Adjusting charging power from {}% to {:.0f}% (target: {:.0f}%)".join(
+                    map(str, (current_power, new_power, target_power))
+                )
             )
             self.controller.set_charging_power_rate(int(new_power))

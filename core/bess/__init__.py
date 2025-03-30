@@ -1,27 +1,25 @@
-# bess/__init__.py
-
 """Battery Energy Storage System (BESS) management package."""
 
-# First import defaults since they're used by other modules
-from .settings import *
+# Define public API - only include what users should directly access
+__all__ = [
+    "BatterySystemManager",  # Main facade
+    "HomeAssistantController",  # Used by pyscript integrations
+    "BatterySettings",  # Public settings classes
+    "HomeSettings",
+    "ConsumptionSettings",
+    "PriceSettings",
+]
 
-# Internal components (not in __all__)
-from .consumption_manager import ConsumptionManager
-from .growatt_schedule import GrowattScheduleManager
-from .battery_monitor import BatteryMonitor
-from .power_monitor import HomePowerMonitor
-from .price_manager import (
-    ElectricityPriceManager,
-    HANordpoolSource,
+# Import settings used by other modules
+from .settings import (  # noqa: I001
+    BatterySettings,
+    ConsumptionSettings,
+    HomeSettings,
+    PriceSettings,
 )
-from .schedule import Schedule
+
+# Import controller for Home Assistant integration
 from .ha_controller import HomeAssistantController
 
-# Import facade last to avoid circular dependencies
-from .system import BatterySystemManager
-
-# Only expose what's needed for pyscript
-__all__ = [
-    'BatterySystemManager',   # Main facade for all operations
-    'HomeAssistantController',  # Required for initial setup
-]
+# Import main facade class (the primary entry point to the system)
+from .battery_system import BatterySystemManager

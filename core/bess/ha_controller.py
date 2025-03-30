@@ -4,7 +4,7 @@
 class HomeAssistantController:
     """A class for interacting with Inverter controls via Home Assistant."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the Controller with default values."""
         self.df_batt_schedule = None
         self.max_attempts = 4
@@ -13,17 +13,48 @@ class HomeAssistantController:
 
     def service_call_with_retry(self, service_domain, service_name, **kwargs):
         """Call the service and retry upon failure."""
-        if self.test_mode:
+        # List of operations that modify state (write operations)
+        write_operations = [
+            ("growatt_server", "update_tlx_inverter_time_segment"),
+            ("switch", "turn_on"),
+            ("switch", "turn_off"),
+            ("number", "set_value"),
+        ]
+
+        # List of operations that return data
+        read_operations = [("growatt_server", "read_tlx_inverter_time_segments")]
+
+        # Only block write operations in test mode
+        is_write_operation = (service_domain, service_name) in write_operations
+        is_read_operation = (service_domain, service_name) in read_operations
+
+        # Test mode only blocks write operations, never read operations
+        if self.test_mode and is_write_operation:
             log.info(
                 "[TEST MODE] Would call service %s.%s with args: %s",
                 service_domain,
                 service_name,
                 kwargs,
             )
-            return
+            return None
 
         for attempt in range(self.max_attempts):
             try:
+                # Handle service calls that return data
+                if is_read_operation:
+                    # For services that return data, we need to use return_response=True
+                    result = service.call(
+                        service_domain, service_name, return_response=True, **kwargs
+                    )
+                    log.debug(
+                        "Service call %s.%s succeeded on attempt %d/%d",
+                        service_domain,
+                        service_name,
+                        attempt + 1,
+                        self.max_attempts,
+                    )
+                    return result
+                # Regular service call with no return value
                 service.call(service_domain, service_name, **kwargs)
                 log.debug(
                     "Service call %s.%s succeeded on attempt %d/%d",
@@ -32,7 +63,7 @@ class HomeAssistantController:
                     attempt + 1,
                     self.max_attempts,
                 )
-                return  # Success, exit function
+                return None  # Success, exit function
             except Exception as e:
                 if attempt < self.max_attempts - 1:  # Not the last attempt
                     log.warning(
@@ -56,22 +87,68 @@ class HomeAssistantController:
                     )
                     raise  # Re-raise the last exception
 
-    def get_estimated_consumption(self) -> float:
-        """Get the estimated hourly consumption in kWh."""
-        return float(state.get("sensor.48h_average_grid_import_power")) / 1000  # noqa: F821
-        
-    def get_current_consumption(self) -> float:
-        # TODO: Actually this is not grid import power, but home consumption (i.e. excl. battery, BEV, including solar production)
-        """Get the current hour's grid consumption in kWh."""
-        return float(state.get("sensor.1h_average_grid_import_power"))
-    
-    def get_battery_soc(self) -> int:
-        """Get the battery state of charge (SOC)."""
-        return int(state.get("sensor.rkm0d7n04x_statement_of_charge_soc"))
+    def get_sensor_value(self, sensor_name):
+        """Get value from any sensor by name."""
+        try:
+            return float(state.get(f"sensor.{sensor_name}"))
+        except (ValueError, TypeError, NameError):
+            log.warning("Could not get value for sensor.%s", sensor_name)
+            return 0.0
 
-    def get_charge_stop_soc(self) -> int:
+    def get_estimated_consumption(self) -> list:
+        """Get estimated hourly consumption for 24 hours."""
+        avg_consumption = self.get_sensor_value("48h_average_grid_import_power") / 1000
+        return [avg_consumption] * 24
+
+    def get_solar_generation_today(self) -> float:
+        """Get the current solar generation reading (cumulative for today)."""
+        return self.get_sensor_value("rkm0d7n04x_solar_production_today")  # noqa: F821
+
+    def get_current_consumption(self) -> float:
+        # Note: This is not grid import power, but home consumption (i.e. excl. battery, BEV, including solar production)
+        """Get the current hour's home consumption in kWh."""
+        return self.get_sensor_value("1h_average_grid_import_power")
+
+    def get_battery_charge_today(self) -> float:
+        """Get total battery charging for today in kWh."""
+        return self.get_sensor_value("rkm0d7n04x_all_batteries_charged_today")
+
+    def get_battery_discharge_today(self) -> float:
+        """Get total battery discharging for today in kWh."""
+        return self.get_sensor_value("rkm0d7n04x_all_batteries_discharged_today")
+
+    def get_self_consumption_today(self) -> float:
+        """Get total solar self-consumption for today in kWh."""
+        return self.get_sensor_value("rkm0d7n04x_self_consumption_today")
+
+    def get_export_to_grid_today(self) -> float:
+        """Get total export to grid for today in kWh."""
+        return self.get_sensor_value("rkm0d7n04x_export_to_grid_today")
+
+    def get_load_consumption_today(self) -> float:
+        """Get total home load consumption for today in kWh."""
+        return self.get_sensor_value("rkm0d7n04x_load_consumption_today")
+
+    def get_import_from_grid_today(self) -> float:
+        """Get total import from grid for today in kWh."""
+        return self.get_sensor_value("rkm0d7n04x_import_from_grid_today")
+
+    def get_grid_to_battery_today(self) -> float:
+        """Get total grid to battery charging for today in kWh."""
+        return self.get_sensor_value("rkm0d7n04x_batteries_charged_from_grid_today")
+
+    # Optional auxiliary load sensors
+    def get_ev_energy_today(self) -> float:
+        """Get total EV charging energy for today in kWh."""
+        return self.get_sensor_value("zap263668_energy_today")
+
+    def get_battery_soc(self) -> float:
+        """Get the battery state of charge (SOC)."""
+        return self.get_sensor_value("rkm0d7n04x_statement_of_charge_soc")
+
+    def get_charge_stop_soc(self) -> float:
         """Get the charge stop state of charge (SOC)."""
-        return int(state.get("number.rkm0d7n04x_charge_stop_soc"))
+        return float(state.get("number.rkm0d7n04x_charge_stop_soc"))
 
     def set_charge_stop_soc(self, charge_stop_soc: int):
         """Set the charge stop state of charge (SOC)."""
@@ -86,7 +163,7 @@ class HomeAssistantController:
 
     def get_discharge_stop_soc(self) -> int:
         """Get the discharge stop state of charge (SOC)."""
-        return int(state.get("number.rkm0d7n04x_discharge_stop_soc"))
+        return float(state.get("number.rkm0d7n04x_discharge_stop_soc"))
 
     def set_discharge_stop_soc(self, discharge_stop_soc: int):
         """Set the charge stop state of charge (SOC)."""
@@ -101,7 +178,7 @@ class HomeAssistantController:
 
     def get_charging_power_rate(self) -> int:
         """Get the charging power rate."""
-        return int(state.get("number.rkm0d7n04x_charging_power_rate"))
+        return float(state.get("number.rkm0d7n04x_charging_power_rate"))
 
     def set_charging_power_rate(self, rate: int):
         """Set the charging power rate."""
@@ -116,7 +193,7 @@ class HomeAssistantController:
 
     def get_discharging_power_rate(self) -> int:
         """Get the discharging power rate."""
-        return int(state.get("number.rkm0d7n04x_discharging_power_rate"))
+        return float(state.get("number.rkm0d7n04x_discharging_power_rate"))
 
     def set_discharging_power_rate(self, rate: int):
         """Set the discharging power rate."""
@@ -131,15 +208,11 @@ class HomeAssistantController:
 
     def get_battery_charge_power(self) -> float:
         """Get current battery charging power in watts."""
-        return float(state.get("sensor.rkm0d7n04x_all_batteries_charge_power"))
+        return self.get_sensor_value("rkm0d7n04x_all_batteries_charge_power")
 
     def get_battery_discharge_power(self) -> float:
         """Get current battery discharging power in watts."""
-        return float(state.get("sensor.rkm0d7n04x_all_batteries_discharged_power"))
-
-    def battery_scheduling_enabled(self) -> bool:
-        """Return True if battery scheduling is enabled."""
-        return state.get("input_boolean.battery_scheduling") == "on"  # noqa: F821
+        return self.get_sensor_value("rkm0d7n04x_all_batteries_discharged_power")
 
     def set_grid_charge(self, enable: bool):
         """Enable or disable grid charging."""
@@ -173,14 +246,6 @@ class HomeAssistantController:
         enabled: bool,
     ):
         """Set the inverter time segment with retry logic."""
-        log.info(
-            "Setting inverter time segment: segment_id=%d, batt_mode=%s, start_time=%s, end_time=%s, enabled=%s",
-            segment_id,
-            batt_mode,
-            start_time,
-            end_time,
-            enabled,
-        )
 
         self.service_call_with_retry(
             "growatt_server",
@@ -193,14 +258,35 @@ class HomeAssistantController:
             blocking=True,
         )
 
+    def read_inverter_time_segments(self):
+        """Read all time segments from the inverter with retry logic."""
+        try:
+            # Call the service and get the response
+            result = self.service_call_with_retry(
+                "growatt_server",
+                "read_tlx_inverter_time_segments",
+                blocking=True,
+                return_response=True,
+            )
+
+            if result and "time_segments" in result:
+                return result["time_segments"]
+
+            # If no segments were returned, try again later
+            log.warning("No time segments available yet, will try again later")
+            return []
+
+        except Exception as e:
+            log.warning("Failed to read time segments: %s", str(e))
+            return []  # Return empty list instead of failing
+
     def print_inverter_status(self):
         """Print the battery settings and consumption prediction."""
         test_mode_str = "[TEST MODE] " if self.test_mode else ""
-        log.info(
+        (
             "\n\n===================================\n"
             "%sInverter Settings\n"
             "===================================\n"
-            "Discharge Scheduling Enabled: %5s\n"
             "Charge from Grid Enabled:     %5s\n"
             "State of Charge (SOC):       %5d%%\n"
             "Charge Stop SOC:             %5d%%\n"
@@ -208,7 +294,6 @@ class HomeAssistantController:
             "Discharging Power Rate:      %5d%%\n"
             "Discharge Stop SOC:          %5d%%\n",
             test_mode_str,
-            self.battery_scheduling_enabled(),
             self.grid_charge_enabled(),
             self.get_battery_soc(),
             self.get_charge_stop_soc(),
@@ -220,7 +305,7 @@ class HomeAssistantController:
     def set_test_mode(self, enabled: bool):
         """Enable or disable test mode."""
         self.test_mode = enabled
-        log.info("%s test mode", "Enabled" if enabled else "Disabled")
+        ("%s test mode", "Enabled" if enabled else "Disabled")
 
     def disable_all_TOU_settings(self):
         """Clear the Time of Use (TOU) settings."""
@@ -239,30 +324,24 @@ class HomeAssistantController:
 
         Returns:
             List of hourly prices for today (24 values)
+
         """
-        try:
-            prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.today")
-            if not prices:
-                raise ValueError("No prices available from Nordpool sensor")
-            return prices
-        except Exception as e:
-            log.error("Error getting today's Nordpool prices: %s", str(e))
-            return []
+        prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.today")
+        if not prices:
+            raise ValueError("No prices available from Nordpool sensor")
+        return prices
 
     def get_nordpool_prices_tomorrow(self) -> list[float]:
         """Get tomorrow's Nordpool prices from Home Assistant sensor.
 
         Returns:
             List of hourly prices for tomorrow (24 values)
+
         """
-        try:
-            prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow")
-            if not prices:
-                raise ValueError("No prices available for tomorrow yet")
-            return prices
-        except Exception as e:
-            log.error("Error getting tomorrow's Nordpool prices: %s", str(e))
-            return []
+        prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow")
+        if not prices:
+            raise ValueError("No prices available for tomorrow yet")
+        return prices
 
     def get_l1_current(self) -> float:
         """Get the current load for L1."""
@@ -284,5 +363,38 @@ class HomeAssistantController:
             return float(state.get("sensor.current_l3_gustavsgatan_32a"))
         except NameError:
             return float(state.get("sensor.tibber_pulse_gustavsgatan_32a_current_l3"))
-    
-    
+
+    def get_solcast_forecast(self, day_offset=0, confidence_level="estimate"):
+        """Get solar forecast data from Solcast integration."""
+        entity_id = "sensor.solcast_pv_forecast_forecast_today"
+        if day_offset == 1:
+            entity_id = "sensor.solcast_pv_forecast_forecast_tomorrow"
+
+        attributes = state.getattr(entity_id)
+        if not attributes:
+            logger.warning(
+                "No attributes found for %s, using default values", entity_id
+            )
+            return [0.0] * 24  # Return zeros as fallback
+
+        hourly_data = attributes.get("detailedHourly")
+        if not hourly_data:
+            logger.warning(
+                "No hourly data found in %s, using default values", entity_id
+            )
+            return [0.0] * 24  # Return zeros as fallback
+
+        hourly_values = [0.0] * 24
+        pv_field = f"pv_{confidence_level}"
+
+        for entry in hourly_data:
+            # Handle both string and datetime objects for period_start
+            period_start = entry["period_start"]
+            hour = (
+                period_start.hour
+                if hasattr(period_start, "hour")
+                else int(period_start.split("T")[1].split(":")[0])
+            )
+            hourly_values[hour] = float(entry[pv_field])
+
+        return hourly_values
