@@ -422,6 +422,9 @@ class BatterySystemManager:
 
         # Always fetch new predictions when preparing for next day
         if prepare_next_day:
+            # Reset energy data for next day
+            self._energy_manager.reset_daily_data()
+            # Fetch new predictions
             self._fetch_predictions()
 
     def _get_price_data(self, prepare_next_day: bool):

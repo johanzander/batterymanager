@@ -322,26 +322,131 @@ class HomeAssistantController:
     def get_nordpool_prices_today(self) -> list[float]:
         """Get today's Nordpool prices from Home Assistant sensor.
 
+        Properly handles DST transitions by ensuring 24 hour values are returned.
+
         Returns:
             List of hourly prices for today (24 values)
 
         """
-        prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.today")
-        if not prices:
-            raise ValueError("No prices available from Nordpool sensor")
-        return prices
+        try:
+            # First check raw data availability
+            raw_today = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.raw_today")
+
+            if not raw_today:
+                # Fallback to regular prices array if raw data not available
+                prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.today")
+                if not prices:
+                    raise ValueError("No prices available from Nordpool sensor")
+                return prices
+
+            # Process raw data to handle DST transitions
+            processed_prices = []
+
+            for hour_data in raw_today:
+                # Extract value directly - we don't need to parse the timestamps
+                # since we know there are 23 hours during spring forward
+                processed_prices.append(hour_data["value"])
+
+            # Ensure we have exactly 24 hours
+            if len(processed_prices) == 23:
+                # This is a spring forward DST day (we're missing one hour)
+                log.info("Detected spring forward DST transition - adding extra hour")
+                # Add an extra hour (duplicate middle hour to avoid affecting peaks)
+                middle_idx = len(processed_prices) // 2
+                processed_prices.insert(middle_idx, processed_prices[middle_idx])
+            elif len(processed_prices) == 25:
+                # This is a fall back DST day (we have an extra hour)
+                log.info("Detected fall back DST transition - removing extra hour")
+                # Remove the duplicate hour
+                middle_idx = len(processed_prices) // 2
+                processed_prices.pop(middle_idx)
+
+            # Final validation
+            if len(processed_prices) != 24:
+                log.warning(
+                    "Unexpected number of hours: %d, adjusting to 24",
+                    len(processed_prices),
+                )
+                if len(processed_prices) < 24:
+                    processed_prices.extend(
+                        [processed_prices[-1]] * (24 - len(processed_prices))
+                    )
+                else:
+                    processed_prices = processed_prices[:24]
+
+            return processed_prices
+
+        except (ValueError, AttributeError, KeyError) as e:
+            log.warning("Failed to get Nordpool prices: %s", str(e))
+            # Return default values as fallback
+            return [0.5] * 24
 
     def get_nordpool_prices_tomorrow(self) -> list[float]:
         """Get tomorrow's Nordpool prices from Home Assistant sensor.
+
+        Properly handles DST transitions by ensuring 24 hour values are returned.
 
         Returns:
             List of hourly prices for tomorrow (24 values)
 
         """
-        prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow")
-        if not prices:
-            raise ValueError("No prices available for tomorrow yet")
-        return prices
+        try:
+            # First check raw data availability
+            raw_tomorrow = state.get(
+                "sensor.nordpool_kwh_se4_sek_2_10_025.raw_tomorrow"
+            )
+
+            if not raw_tomorrow:
+                # Fallback to regular prices array if raw data not available
+                prices = state.get("sensor.nordpool_kwh_se4_sek_2_10_025.tomorrow")
+                if not prices:
+                    raise ValueError("No prices available for tomorrow yet")
+                return prices
+
+            # Process raw data to handle DST transitions
+            processed_prices = []
+
+            for hour_data in raw_tomorrow:
+                # Extract value directly
+                processed_prices.append(hour_data["value"])
+
+            # Ensure we have exactly 24 hours
+            if len(processed_prices) == 23:
+                # This is a spring forward DST day (we're missing one hour)
+                log.info(
+                    "Detected spring forward DST transition for tomorrow - adding extra hour"
+                )
+                # Add an extra hour (duplicate middle hour to avoid affecting peaks)
+                middle_idx = len(processed_prices) // 2
+                processed_prices.insert(middle_idx, processed_prices[middle_idx])
+            elif len(processed_prices) == 25:
+                # This is a fall back DST day (we have an extra hour)
+                log.info(
+                    "Detected fall back DST transition for tomorrow - removing extra hour"
+                )
+                # Remove the duplicate hour
+                middle_idx = len(processed_prices) // 2
+                processed_prices.pop(middle_idx)
+
+            # Final validation
+            if len(processed_prices) != 24:
+                log.warning(
+                    "Unexpected number of hours for tomorrow: %d, adjusting to 24",
+                    len(processed_prices),
+                )
+                if len(processed_prices) < 24:
+                    processed_prices.extend(
+                        [processed_prices[-1]] * (24 - len(processed_prices))
+                    )
+                else:
+                    processed_prices = processed_prices[:24]
+
+            return processed_prices
+
+        except (ValueError, AttributeError, KeyError) as e:
+            log.warning("Failed to get Nordpool prices for tomorrow: %s", str(e))
+            # Return default values as fallback
+            return [0.5] * 24
 
     def get_l1_current(self) -> float:
         """Get the current load for L1."""

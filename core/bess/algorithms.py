@@ -154,7 +154,6 @@ def optimize_battery(
         n_hours,
     )
 
-    # ADDED: Final energy balance check to ensure physical feasibility
     total_solar_energy = sum(solar_charged)
     total_virtual_energy = 0.0
     if virtual_stored_energy:
@@ -168,7 +167,7 @@ def optimize_battery(
         elif action < 0:
             total_discharging += -action
 
-    total_energy_in = total_solar_energy + total_charging
+    total_energy_in = total_solar_energy + total_charging + total_virtual_energy
     total_energy_out = total_discharging
 
     # Check for significant imbalance (more than 5%)
@@ -293,14 +292,6 @@ def optimize_battery(
         elif action < 0:
             total_discharged += -action
 
-    # Log final result using schedule data for consistency
-    logger.info(
-        "Optimization complete: Base cost: %.2f, Optimized: %.2f, Savings: %.2f",
-        schedule_base_cost,
-        schedule_optimized_cost,
-        schedule_savings,
-    )
-
     # Add additional solar info to log
     total_solar = 0.0
     for solar in solar_charged:
@@ -345,7 +336,7 @@ def _run_battery_optimization(
 
     # First, generate trades for solar energy
     # Assign a very low virtual "charging price" to solar energy
-    solar_price = min(prices) * 0.1  # 10% of the lowest grid price
+    solar_price = 0.0
 
     for hour in range(n_hours):
         if solar_charged[hour] > 0:
@@ -353,12 +344,7 @@ def _run_battery_optimization(
             for discharge_hour in range(hour + 1, n_hours):
                 discharge_price = prices[discharge_hour]
 
-                # Solar energy still incurs discharge portion of cycle cost
-                solar_cycle_cost = (
-                    cycle_cost * 0.5
-                )  # Only discharge cost, charging is "free"
-
-                profit_per_kwh = discharge_price - solar_price - solar_cycle_cost
+                profit_per_kwh = discharge_price - solar_price - cycle_cost
 
                 # Only consider profitable discharges
                 if profit_per_kwh > min_profit_threshold:
@@ -367,7 +353,7 @@ def _run_battery_optimization(
                         "discharge_hour": discharge_hour,
                         "charge_price": solar_price,
                         "discharge_price": discharge_price,
-                        "cycle_cost": solar_cycle_cost,
+                        "cycle_cost": cycle_cost,
                         "profit_per_kwh": profit_per_kwh,
                         "is_solar": True,  # Mark as solar trade for special handling
                         "solar_amount": solar_charged[hour],  # The amount available
@@ -512,6 +498,7 @@ def _execute_trades_with_solar_priority(
             total_energy_out=0.0,
         )
         # Update total energy tracking
+        total_energy_in += virtual_trades[0].get("virtual_amount", 0)
         total_energy_out = virtual_energy_out
     else:
         total_energy_out = 0.0

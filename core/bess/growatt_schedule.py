@@ -262,7 +262,7 @@ class GrowattScheduleManager:
                 interval_hour = int(interval["start_time"].split(":")[0])
                 if interval_hour == hour:
                     state = interval["state"]
-                    is_battery_first = state not in {"charging", "discharging"}
+                    is_battery_first = state != "discharging"
                     break
 
             if is_battery_first:

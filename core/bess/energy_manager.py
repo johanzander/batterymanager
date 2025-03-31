@@ -79,6 +79,9 @@ Usage:
     # Get full day combined historical/forecast data for optimization
     energy_profile = energy_manager.get_full_day_energy_profile()
 
+    # Reset daily data. Should be called before starting a new day.
+    energy_manager.reset_daily_data()
+
     # Log energy balance report
     energy_manager.log_energy_balance()
 """
@@ -986,6 +989,8 @@ class EnergyManager:
                     _LOGGER.warning(
                         "Invalid solar predictions format, keeping defaults"
                     )
+
+                self.log_energy_balance()
             except (AttributeError, ValueError) as e:
                 _LOGGER.warning("Failed to fetch predictions: %s", str(e))
 
@@ -2133,7 +2138,7 @@ class EnergyManager:
         # Calculate hourly and total values for all 24 hours (historical + predictions)
         hourly_data = []
 
-        # Initialize totals for historical data only
+        # Initialize totals for all data (historical + projected)
         totals = {
             "system_production": 0.0,
             "import_from_grid": 0.0,
@@ -2181,17 +2186,6 @@ class EnergyManager:
                     # Use predicted values from combined data
                     battery_soc = battery_soc_predictions[hour]
                     battery_soe = battery_soe_predictions[hour]
-
-                # Update totals for historical data
-                totals["system_production"] += solar_production
-                totals["grid_to_battery"] += grid_to_battery
-                totals["solar_to_battery"] += solar_to_battery
-                totals["battery_charge"] += battery_charge
-                totals["import_from_grid"] += import_from_grid
-                totals["load_consumption"] += load_consumption
-                totals["export_to_grid"] += export_to_grid
-                totals["battery_discharge"] += battery_discharge
-                totals["aux_load"] += aux_load
             else:
                 # Use predictions for this hour
                 solar_production = solar_predictions[hour]
@@ -2252,6 +2246,17 @@ class EnergyManager:
             }
 
             hourly_data.append(hour_data)
+
+            # IMPORTANT FIX: Update totals for both historical and predicted hours
+            totals["system_production"] += solar_production
+            totals["import_from_grid"] += import_from_grid
+            totals["load_consumption"] += load_consumption
+            totals["export_to_grid"] += export_to_grid
+            totals["battery_charge"] += battery_charge
+            totals["battery_discharge"] += battery_discharge
+            totals["grid_to_battery"] += grid_to_battery
+            totals["solar_to_battery"] += solar_to_battery
+            totals["aux_load"] += aux_load
 
         # Find all hours with actual energy data
         historical_hours = []
