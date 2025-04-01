@@ -25,6 +25,7 @@ def run_on_startup():
     current_hour = datetime.now().hour
     log.info("BatteryManager startup - Current hour: %d:00", current_hour)
 
+    system.start()
     success = system.update_battery_schedule(current_hour)
     if not success:
         log.warning("Failed to create initial schedule")

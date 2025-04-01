@@ -92,7 +92,7 @@ import logging
 from .influxdb_helper import get_sensor_data
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
+# _LOGGER.setLevel(logging.DEBUG)
 
 
 class EnergyManager:
@@ -163,9 +163,6 @@ class EnergyManager:
         # Initialize energy flow storage dictionaries - indexed by hour (0-23)
         self._init_energy_storage_dicts()
 
-        # Initialize with historical data
-        self._fetch_and_initialize_historical_data()
-
         # Log current energy state
         self.log_energy_balance()
 
@@ -214,7 +211,7 @@ class EnergyManager:
         else:
             return True
 
-    def _fetch_and_initialize_historical_data(self):
+    def fetch_and_initialize_historical_data(self):
         """Fetch historical data and initialize energy flows.
 
         This method retrieves historical energy data from sensors and initializes
@@ -359,7 +356,7 @@ class EnergyManager:
             "rkm0d7n04x_lifetime_total_export_to_grid",
             "rkm0d7n04x_lifetime_total_load_consumption",
             "rkm0d7n04x_lifetime_import_from_grid",
-            "rkm0d7n04x_statement_of_charge_soc",  # Include SOC for historical values
+            "rkm0d7n04x_statement_of_charge_soc",
             "rkm0d7n04x_lifetime_system_production",
             "rkm0d7n04x_lifetime_self_consumption",
         ]
