@@ -44,9 +44,6 @@ class GrowattScheduleManager:
         self.current_hour = current_hour
         self._consolidate_and_convert()
 
-    #        self._log_growatt_schedule()
-    #        self.log_current_TOU_schedule("KUUUUUUK")
-
     def initialize_from_tou_segments(self, tou_segments, current_hour=0):
         """Initialize GrowattScheduleManager with TOU intervals from the inverter.
 
@@ -81,7 +78,8 @@ class GrowattScheduleManager:
             # Convert integer to string representation if needed
             if isinstance(raw_batt_mode, int):
                 # Map integer values to string modes
-                batt_mode_map = {0: "load-first", 1: "battery-first", 2: "grid-first"}
+                batt_mode_map = {0: "load-first",
+                                 1: "battery-first", 2: "grid-first"}
                 batt_mode = batt_mode_map.get(raw_batt_mode, "battery-first")
             else:
                 batt_mode = raw_batt_mode
@@ -232,7 +230,8 @@ class GrowattScheduleManager:
         if not hourly_intervals:
             return
 
-        logger.debug("Starting _consolidate_and_convert at hour %d", self.current_hour)
+        logger.debug(
+            "Starting _consolidate_and_convert at hour %d", self.current_hour)
 
         # Log current intervals for debugging
         if hasattr(self, "tou_intervals"):
@@ -354,7 +353,8 @@ class GrowattScheduleManager:
                     segment_id = current_interval["segment_id"]
 
                     # Use original start time if earlier
-                    start_hour = int(current_interval["start_time"].split(":")[0])
+                    start_hour = int(
+                        current_interval["start_time"].split(":")[0])
                     if start_hour < period[0]:
                         start_time = current_interval["start_time"]
 
@@ -610,7 +610,8 @@ class GrowattScheduleManager:
         if not header:
             header = " -= Growatt TOU Schedule =- "
 
-        col_widths = {"segment": 8, "start": 9, "end": 8, "mode": 15, "enabled": 8}
+        col_widths = {"segment": 8, "start": 9,
+                      "end": 8, "mode": 15, "enabled": 8}
         total_width = sum(col_widths.values()) + len(col_widths) - 1
 
         header_format = (

@@ -80,7 +80,7 @@ import logging
 from .savings_calculator import SavingsCalculator, calculate_trade_profitability
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 
 
 def optimize_battery(
@@ -356,7 +356,8 @@ def _run_battery_optimization(
                         "cycle_cost": cycle_cost,
                         "profit_per_kwh": profit_per_kwh,
                         "is_solar": True,  # Mark as solar trade for special handling
-                        "solar_amount": solar_charged[hour],  # The amount available
+                        # The amount available
+                        "solar_amount": solar_charged[hour],
                     }
                     all_trades.append(solar_trade)
 
@@ -392,7 +393,8 @@ def _run_battery_optimization(
                 discharge_cycle_cost = 0  # Cost already included
             else:
                 # Adjust discharge cost based on solar ratio
-                discharge_cycle_cost = cycle_cost * 0.5 * (1 - solar_ratio * 0.5)
+                discharge_cycle_cost = cycle_cost * \
+                    0.5 * (1 - solar_ratio * 0.5)
 
             profit_per_kwh = discharge_price - stored_price - discharge_cycle_cost
 
@@ -416,7 +418,8 @@ def _run_battery_optimization(
                 )
 
     # Then, find regular grid charging trades
-    grid_trades = _find_profitable_trades(prices, cycle_cost, min_profit_threshold)
+    grid_trades = _find_profitable_trades(
+        prices, cycle_cost, min_profit_threshold)
     all_trades.extend(grid_trades)
 
     # Sort all trades by profit per kWh (most profitable first)
@@ -476,7 +479,8 @@ def _execute_trades_with_solar_priority(
         total_energy_in,
         total_solar_energy,
     )
-    logger.debug("Available capacity for charging: %.1f kWh", energy_for_discharge)
+    logger.debug("Available capacity for charging: %.1f kWh",
+                 energy_for_discharge)
 
     # Process virtual stored energy trades (energy already in battery)
     virtual_trades = []
@@ -636,7 +640,8 @@ def _process_virtual_trades(
 
     available_virtual_energy = virtual_trades[0].get("virtual_amount", 0)
     stored_price = virtual_trades[0].get("charge_price", 0)
-    logger.debug("Processing virtual stored energy: %.1f kWh", available_virtual_energy)
+    logger.debug("Processing virtual stored energy: %.1f kWh",
+                 available_virtual_energy)
 
     # Track how much virtual energy we've planned to discharge
     virtual_energy_planned = 0.0
@@ -896,7 +901,8 @@ def _process_grid_trades(
     stored_energy_cost = None
     if virtual_stored_energy is not None:
         stored_energy_cost = virtual_stored_energy.get("price")
-        logger.debug("Using stored energy cost basis: %.3f SEK/kWh", stored_energy_cost)
+        logger.debug("Using stored energy cost basis: %.3f SEK/kWh",
+                     stored_energy_cost)
 
     for trade in grid_trades:
         charge_hour = trade["charge_hour"]
@@ -918,7 +924,8 @@ def _process_grid_trades(
 
         # Calculate charge amount - convert max power (kW) to energy (kWh) for the hour
         # Since we're working with 1-hour intervals, kW directly translates to kWh
-        charge_amount = min(max_charge_power_kw, total_capacity - current_soe - 0.01)
+        charge_amount = min(max_charge_power_kw,
+                            total_capacity - current_soe - 0.01)
         charge_amount = min(charge_amount, energy_for_discharge)
 
         # Skip if minimal charge
@@ -972,7 +979,8 @@ def _process_grid_trades(
                 )
                 # Adjust charge amount
                 charge_amount = max(0, total_capacity - current_soe - 0.01)
-                logger.debug("Adjusted charge amount to %.1f kWh", charge_amount)
+                logger.debug(
+                    "Adjusted charge amount to %.1f kWh", charge_amount)
                 if charge_amount < 0.1:
                     continue
 
@@ -1112,7 +1120,8 @@ def _validate_discharge_plan(
             potential_total_out,
         )
         # Scale down discharge plan
-        scale_factor = (potential_total_in - total_energy_out) / plan_total_discharge
+        scale_factor = (potential_total_in - total_energy_out) / \
+            plan_total_discharge
         scaled_plan = []
         for hour, amount in discharge_plan:
             scaled_amount = amount * scale_factor
@@ -1261,7 +1270,8 @@ def _apply_solar_charging(
 
     for hour in range(n_hours):
         if solar_charged[hour] > 0:
-            logger.debug("Hour %d: Adding %.1f kWh solar", hour, solar_charged[hour])
+            logger.debug("Hour %d: Adding %.1f kWh solar",
+                         hour, solar_charged[hour])
 
             # ONLY update future hours, NOT current hour
             for future_hour in range(hour + 1, n_hours):
@@ -1305,7 +1315,8 @@ def _find_profitable_trades(prices, cycle_cost, min_profit_threshold):
                 profitable_trades.append(trade)
 
     # Sort trades by profit per kWh (most profitable first)
-    profitable_trades.sort(key=lambda x: x.get("profit_per_kwh", 0), reverse=True)
+    profitable_trades.sort(key=lambda x: x.get(
+        "profit_per_kwh", 0), reverse=True)
     return profitable_trades
 
 
@@ -1336,17 +1347,20 @@ def _plan_discharges(primary_trade, trades, discharge_capacities, energy_to_disc
             if (
                 secondary_trade["discharge_hour"] != primary_trade["discharge_hour"]
                 and secondary_trade.get("charge_hour", -99)
-                == primary_trade.get("charge_hour", -98)  # Handle virtual trades
+                # Handle virtual trades
+                == primary_trade.get("charge_hour", -98)
                 and discharge_capacities.get(secondary_trade["discharge_hour"], 0) > 0
                 and secondary_trade.get("profit_per_kwh", 0) > 0
             ):
                 secondary_discharge = min(
-                    discharge_capacities.get(secondary_trade["discharge_hour"], 0),
+                    discharge_capacities.get(
+                        secondary_trade["discharge_hour"], 0),
                     energy_to_discharge,
                 )
                 if secondary_discharge > 0:
                     discharge_plan.append(
-                        (secondary_trade["discharge_hour"], secondary_discharge)
+                        (secondary_trade["discharge_hour"],
+                         secondary_discharge)
                     )
                     energy_to_discharge -= secondary_discharge
                     logger.debug(

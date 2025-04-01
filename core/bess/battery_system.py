@@ -165,13 +165,15 @@ class BatterySystemManager:
         except (AttributeError, ValueError) as e:
             # AttributeError: Controller missing required method
             # ValueError: Invalid data returned from inverter
-            logger.error("Failed to read current inverter schedule: %s", str(e))
+            logger.error(
+                "Failed to read current inverter schedule: %s", str(e))
         except TimeoutError as e:
             # Specifically handle timeout issues
             logger.error("Timeout connecting to inverter: %s", str(e))
         except KeyError as e:
             # Handle missing keys in returned data
-            logger.error("Malformed data from inverter, missing key: %s", str(e))
+            logger.error(
+                "Malformed data from inverter, missing key: %s", str(e))
 
     def _fetch_predictions(self):
         """Fetch latest consumption and solar predictions.
@@ -184,7 +186,8 @@ class BatterySystemManager:
         except (AttributeError, ValueError) as e:
             # AttributeError: Energy manager missing required method
             # ValueError: Invalid prediction data
-            logger.warning("Failed to fetch predictions, using defaults: %s", str(e))
+            logger.warning(
+                "Failed to fetch predictions, using defaults: %s", str(e))
 
     def _compare_schedules(self, temp_growatt, from_hour, temp_schedule=None):
         """Compare schedules from given hour onwards.
@@ -306,7 +309,8 @@ class BatterySystemManager:
             raise ValueError(f"Invalid hour: {hour} (must be 0-23)")
 
         if prepare_next_day:
-            logger.info("Preparing schedule for next day at hour %02d:00 ", hour)
+            logger.info(
+                "Preparing schedule for next day at hour %02d:00 ", hour)
         else:
             logger.info("Updating battery schedule for hour %02d:00 ", hour)
 
@@ -398,6 +402,19 @@ class BatterySystemManager:
                 logger.error("Timeout when applying schedule: %s", str(e))
                 return False
 
+        # Always apply the current hour's settings when not preparing for next day
+        if not prepare_next_day:
+            try:
+                self._apply_hourly_schedule(hour)
+                logger.info("Applied hourly settings for hour %02d:00", hour)
+            except (ValueError, KeyError, AttributeError) as e:
+                logger.error("Failed to apply hourly settings: %s", str(e))
+                return False
+            except TimeoutError as e:
+                logger.error(
+                    "Timeout when applying hourly settings: %s", str(e))
+                return False
+
         return True
 
     def _handle_special_cases(self, hour: int, prepare_next_day: bool):
@@ -413,7 +430,8 @@ class BatterySystemManager:
             try:
                 current_soc = self._controller.get_battery_soc()
                 self._initial_soc = current_soc
-                logger.info("Setting initial SOC for day: %s%%", self._initial_soc)
+                logger.info("Setting initial SOC for day: %s%%",
+                            self._initial_soc)
             except (AttributeError, ValueError) as e:
                 logger.warning("Failed to get initial SOC: %s", str(e))
 
@@ -483,7 +501,8 @@ class BatterySystemManager:
         # Handle DST transitions (23 or 25 hours)
         expected_hours = 24
         if len(prices) == 23:
-            logger.info("Detected DST spring forward transition - day has 23 hours")
+            logger.info(
+                "Detected DST spring forward transition - day has 23 hours")
             expected_hours = 23
         elif len(prices) == 25:
             logger.info("Detected DST fall back transition - day has 25 hours")
@@ -523,7 +542,8 @@ class BatterySystemManager:
                 except (ValueError, AttributeError, KeyError) as e:
                     logger.warning("Failed to update hour data: %s", str(e))
             else:
-                logger.info("Hour %02d already processed, skipping update", prev_hour)
+                logger.info(
+                    "Hour %02d already processed, skipping update", prev_hour)
 
         # Log energy balance if not preparing for next day
         if not prepare_next_day:
@@ -614,7 +634,8 @@ class BatterySystemManager:
                 )
                 # Extend or truncate to 24 hours
                 if len(solar_predictions) < 24:
-                    solar_predictions.extend([0.0] * (24 - len(solar_predictions)))
+                    solar_predictions.extend(
+                        [0.0] * (24 - len(solar_predictions)))
                 else:
                     solar_predictions = solar_predictions[:24]
 
@@ -628,7 +649,8 @@ class BatterySystemManager:
         else:
             # Get combined energy data for optimization
             try:
-                energy_profile = self._energy_manager.get_full_day_energy_profile(hour)
+                energy_profile = self._energy_manager.get_full_day_energy_profile(
+                    hour)
             except (AttributeError, ValueError, KeyError) as e:
                 logger.error("Failed to get combined energy data: %s", str(e))
                 return None
@@ -640,7 +662,8 @@ class BatterySystemManager:
             "full_consumption": energy_profile["consumption"],
             "full_solar": energy_profile["solar"],
             "combined_actions": [0.0] * 24,
-            "combined_soe": [current_soe] * 24,  # Initialize with current energy
+            # Initialize with current energy
+            "combined_soe": [current_soe] * 24,
             "solar_charged": [0.0] * 24,
         }
 
@@ -726,7 +749,8 @@ class BatterySystemManager:
                         self._current_schedule.solar_charged[i]
                     )
         except (IndexError, AttributeError) as e:
-            logger.warning("Failed to copy historical data from schedule: %s", str(e))
+            logger.warning(
+                "Failed to copy historical data from schedule: %s", str(e))
             # Continue with default values already in optimization_data
 
     def _reconstruct_historical_data_from_energy_manager(
@@ -761,7 +785,8 @@ class BatterySystemManager:
                     if hour_data:
                         # Calculate net action (positive for charging, negative for discharging)
                         net_action = (
-                            hour_data["battery_charge"] - hour_data["battery_discharge"]
+                            hour_data["battery_charge"] -
+                            hour_data["battery_discharge"]
                         )
                         optimization_data["combined_actions"][i] = net_action
 
@@ -787,11 +812,13 @@ class BatterySystemManager:
         # Extract the correct SOE from optimization_data
         current_soe = optimization_data["combined_soe"][optimization_hour]
         # Convert to SOC percentage
-        current_soc = (current_soe / self.battery_settings.total_capacity) * 100.0
+        current_soc = (
+            current_soe / self.battery_settings.total_capacity) * 100.0
 
         """Run the battery optimization algorithm."""
         try:
-            logger.debug("_run_optimization: Input current_soc: %.1f%%", current_soc)
+            logger.debug(
+                "_run_optimization: Input current_soc: %.1f%%", current_soc)
             logger.debug(
                 "_run_optimization: SOE for hour %d in optimization_data: %.1f kWh",
                 optimization_hour,
@@ -810,10 +837,10 @@ class BatterySystemManager:
 
             # Ensure all arrays have exactly the same length to prevent errors
             remaining_consumption = optimization_data["full_consumption"][
-                optimization_hour : optimization_hour + n_hours
+                optimization_hour: optimization_hour + n_hours
             ]
             remaining_solar = optimization_data["full_solar"][
-                optimization_hour : optimization_hour + n_hours
+                optimization_hour: optimization_hour + n_hours
             ]
 
             # Verify array lengths match
@@ -841,7 +868,8 @@ class BatterySystemManager:
                 )
                 if len(remaining_solar) < n_hours:
                     # Extend with zeros
-                    remaining_solar.extend([0.0] * (n_hours - len(remaining_solar)))
+                    remaining_solar.extend(
+                        [0.0] * (n_hours - len(remaining_solar)))
                 else:
                     # Truncate
                     remaining_solar = remaining_solar[:n_hours]
@@ -854,7 +882,8 @@ class BatterySystemManager:
                 )
 
             # Select appropriate cycle cost based on price model
-            cycle_cost = self.battery_settings.cycle_cost  # Default value (without VAT)
+            # Default value (without VAT)
+            cycle_cost = self.battery_settings.cycle_cost
             if self.price_settings.use_actual_price:
                 # If using retail prices with VAT, apply VAT to cycle cost
                 cycle_cost = cycle_cost * self.price_settings.vat_multiplier
@@ -866,7 +895,8 @@ class BatterySystemManager:
                 reserved_capacity=self.battery_settings.reserved_capacity,
                 cycle_cost=self.battery_settings.cycle_cost,
                 hourly_consumption=remaining_consumption,
-                max_charge_power_kw=(self.battery_settings.charging_power_rate / 100)
+                max_charge_power_kw=(
+                    self.battery_settings.charging_power_rate / 100)
                 * self.battery_settings.max_charge_power_kw,
                 min_profit_threshold=self.price_settings.min_profit,
                 initial_soc=current_soc,
@@ -938,7 +968,8 @@ class BatterySystemManager:
             total_charged = solar_charged_today + grid_charged_today
 
             if total_charged > 0:
-                solar_ratio = min(1.0, max(0.0, solar_charged_today / total_charged))
+                solar_ratio = min(
+                    1.0, max(0.0, solar_charged_today / total_charged))
 
             grid_ratio = 1.0 - solar_ratio
 
@@ -999,7 +1030,8 @@ class BatterySystemManager:
                 "Will look for discharge opportunities above this price threshold"
             )
         except (ValueError, ZeroDivisionError) as e:
-            logger.warning("Failed to calculate stored energy cost basis: %s", str(e))
+            logger.warning(
+                "Failed to calculate stored energy cost basis: %s", str(e))
             return None
         else:
             return virtual_stored_energy
@@ -1036,7 +1068,8 @@ class BatterySystemManager:
             # Add optimized actions to the combined array
             for i in range(len(result["actions"])):
                 if optimization_hour + i < 24:
-                    combined_actions[optimization_hour + i] = result["actions"][i]
+                    combined_actions[optimization_hour +
+                                     i] = result["actions"][i]
 
             # For hour 0, always use the current SOC reading
             # For other hours, use the value from optimization_data if available
@@ -1050,7 +1083,8 @@ class BatterySystemManager:
             # Add future SOE values from optimization results
             for i in range(1, len(result["state_of_energy"])):
                 if optimization_hour + i < 24:
-                    combined_soe[optimization_hour + i] = result["state_of_energy"][i]
+                    combined_soe[optimization_hour +
+                                 i] = result["state_of_energy"][i]
 
             # Add solar predictions from optimization
             if "solar_charged" in result:
@@ -1101,7 +1135,8 @@ class BatterySystemManager:
             effective_hour = 0 if prepare_next_day else optimization_hour
 
             # Now create the schedule with current hour
-            temp_growatt.create_schedule(temp_schedule, current_hour=effective_hour)
+            temp_growatt.create_schedule(
+                temp_schedule, current_hour=effective_hour)
         except (KeyError, IndexError, ValueError, AttributeError) as e:
             logger.error("Failed to create schedule: %s", str(e))
             return None
@@ -1336,7 +1371,8 @@ class BatterySystemManager:
                 if not current_segment["enabled"]:
                     continue
 
-                current_start = int(current_segment["start_time"].split(":")[0])
+                current_start = int(
+                    current_segment["start_time"].split(":")[0])
                 current_end = int(current_segment["end_time"].split(":")[0])
 
                 # Check for overlap
@@ -1410,22 +1446,45 @@ class BatterySystemManager:
         # Get settings from schedule manager
         settings = self._schedule_manager.get_hourly_settings(hour)
 
-        # Apply grid charge setting
-        grid_charge_enabled = bool(settings["grid_charge"])
+        # Apply grid charge setting - only if different from current state
         try:
             current_grid_charge = self._controller.grid_charge_enabled()
-            if grid_charge_enabled != current_grid_charge:
-                self._controller.set_grid_charge(grid_charge_enabled)
+            if settings["grid_charge"] != current_grid_charge:
+                logger.info(
+                    "Changing grid charge from %s to %s for hour %02d:00",
+                    current_grid_charge,
+                    settings["grid_charge"],
+                    hour
+                )
+                self._controller.set_grid_charge(settings["grid_charge"])
+            else:
+                logger.debug(
+                    "Grid charge already in correct state (%s) for hour %02d:00",
+                    settings["grid_charge"],
+                    hour
+                )
         except (AttributeError, ValueError) as e:
             logger.error("Failed to set grid charge: %s", str(e))
             raise
 
-        # Apply discharge rate
+        # Apply discharge rate - only if different from current state
         discharge_rate = int(settings["discharge_rate"])
         try:
             current_discharge_rate = self._controller.get_discharging_power_rate()
             if discharge_rate != current_discharge_rate:
+                logger.info(
+                    "Changing discharge rate from %d%% to %d%% for hour %02d:00",
+                    current_discharge_rate,
+                    discharge_rate,
+                    hour
+                )
                 self._controller.set_discharging_power_rate(discharge_rate)
+            else:
+                logger.debug(
+                    "Discharge rate already in correct state (%d%%) for hour %02d:00",
+                    discharge_rate,
+                    hour
+                )
         except (AttributeError, ValueError) as e:
             logger.error("Failed to set discharge rate: %s", str(e))
             raise
@@ -1635,7 +1694,8 @@ class BatterySystemManager:
                     prices=prices,
                     cycle_cost=self.battery_settings.cycle_cost,
                     hourly_consumption=hourly_consumption,
-                    solar_charged=optimization_result.get("solar_charged", [0.0] * 24),
+                    solar_charged=optimization_result.get(
+                        "solar_charged", [0.0] * 24),
                 )
 
                 schedule.log_schedule()
@@ -1646,5 +1706,6 @@ class BatterySystemManager:
             raise ValueError(f"Failed to create schedule: {e!s}") from e
         else:
             if schedule is None:
-                raise ValueError("Optimization failed to produce valid results")
+                raise ValueError(
+                    "Optimization failed to produce valid results")
             return schedule
