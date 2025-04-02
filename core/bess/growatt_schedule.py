@@ -55,22 +55,15 @@ class GrowattScheduleManager:
         # Store current hour
         self.current_hour = current_hour
 
-        # Filter enabled segments
-        active_segments = [
-            segment for segment in tou_segments if segment.get("enabled", False)
-        ]
-
-        if not active_segments:
-            logger.info("No active TOU segments found in inverter")
-            self.tou_intervals = []
-            return
-
-        # Store TOU intervals exactly as they are
+        # Store ALL TOU intervals exactly as they are, not just enabled ones
         self.tou_intervals = []
 
-        for segment in active_segments:
-            # Get segment ID
+        for segment in tou_segments:
+            # Get original segment ID
             segment_id = segment.get("segment_id")
+
+            # Extract enabled status
+            is_enabled = segment.get("enabled", False)
 
             # Process the batt_mode value which might be integer or string
             raw_batt_mode = segment.get("batt_mode")
@@ -78,32 +71,35 @@ class GrowattScheduleManager:
             # Convert integer to string representation if needed
             if isinstance(raw_batt_mode, int):
                 # Map integer values to string modes
-                batt_mode_map = {0: "load-first",
-                                 1: "battery-first", 2: "grid-first"}
+                batt_mode_map = {0: "load-first", 1: "battery-first", 2: "grid-first"}
                 batt_mode = batt_mode_map.get(raw_batt_mode, "battery-first")
             else:
                 batt_mode = raw_batt_mode
 
-            # Only include battery-first intervals
-            if batt_mode == "battery-first":
-                # Create TOU interval with original segment_id
-                self.tou_intervals.append(
-                    {
-                        "segment_id": segment_id,
-                        "batt_mode": "battery-first",
-                        "start_time": segment.get("start_time", "00:00"),
-                        "end_time": segment.get("end_time", "23:59"),
-                        "enabled": True,
-                    }
-                )
+            # Create TOU interval with original properties
+            self.tou_intervals.append(
+                {
+                    "segment_id": segment_id,  # Keep original segment ID
+                    "batt_mode": batt_mode,
+                    "start_time": segment.get("start_time", "00:00"),
+                    "end_time": segment.get("end_time", "23:59"),
+                    "enabled": is_enabled,
+                }
+            )
 
-        # Sort intervals by start time for logging clarity
-        self.tou_intervals.sort(key=lambda x: x["start_time"])
+        # Sort intervals by segment_id to maintain original order
+        self.tou_intervals.sort(key=lambda x: x["segment_id"])
 
-        # Log the TOU settings
-        self.log_current_TOU_schedule(
-            "Creating schedule by reading time segments from inverter"
-        )
+        # For logging display, we'll show only enabled intervals
+        enabled_intervals = [seg for seg in self.tou_intervals if seg["enabled"]]
+
+        # Log the TOU settings (showing only enabled ones for clarity)
+        if enabled_intervals:
+            self.log_current_TOU_schedule(
+                "Creating schedule by reading time segments from inverter"
+            )
+        else:
+            logger.info("No active TOU segments found in inverter")
 
     def compare_schedules(self, other_schedule, from_hour=0):
         """Compare this schedule with another GrowattScheduleManager.
@@ -230,8 +226,7 @@ class GrowattScheduleManager:
         if not hourly_intervals:
             return
 
-        logger.debug(
-            "Starting _consolidate_and_convert at hour %d", self.current_hour)
+        logger.debug("Starting _consolidate_and_convert at hour %d", self.current_hour)
 
         # Log current intervals for debugging
         if hasattr(self, "tou_intervals"):
@@ -351,12 +346,14 @@ class GrowattScheduleManager:
                     if not interval["enabled"]:
                         continue
 
-                    existing_start_hour = int(
-                        interval["start_time"].split(":")[0])
+                    existing_start_hour = int(interval["start_time"].split(":")[0])
                     existing_end_hour = int(interval["end_time"].split(":")[0])
 
                     # Case 1: New period overlaps with start of existing interval
-                    if period[0] <= existing_start_hour and period[-1] >= existing_start_hour:
+                    if (
+                        period[0] <= existing_start_hour
+                        and period[-1] >= existing_start_hour
+                    ):
                         has_overlap = True
                         # Extend existing interval to start at period start
                         if period[0] < existing_start_hour:
@@ -365,12 +362,17 @@ class GrowattScheduleManager:
                             end_time = interval["end_time"]
                             logger.debug(
                                 "Extending interval %d backwards: now %s-%s",
-                                segment_id, start_time, end_time
+                                segment_id,
+                                start_time,
+                                end_time,
                             )
                             break
 
                     # Case 2: New period overlaps with end of existing interval
-                    if period[0] <= existing_end_hour and period[-1] >= existing_end_hour:
+                    if (
+                        period[0] <= existing_end_hour
+                        and period[-1] >= existing_end_hour
+                    ):
                         has_overlap = True
                         # Extend existing interval to end at period end
                         if period[-1] > existing_end_hour:
@@ -379,12 +381,17 @@ class GrowattScheduleManager:
                             start_time = interval["start_time"]
                             logger.debug(
                                 "Extending interval %d forwards: now %s-%s",
-                                segment_id, start_time, end_time
+                                segment_id,
+                                start_time,
+                                end_time,
                             )
                             break
 
                     # Case 3: New period is contained entirely within existing interval
-                    if existing_start_hour <= period[0] and existing_end_hour >= period[-1]:
+                    if (
+                        existing_start_hour <= period[0]
+                        and existing_end_hour >= period[-1]
+                    ):
                         has_overlap = True
                         # Just reuse the existing interval
                         segment_id = interval["segment_id"]
@@ -392,18 +399,25 @@ class GrowattScheduleManager:
                         end_time = interval["end_time"]
                         logger.debug(
                             "Reusing interval %d that contains period: %s-%s",
-                            segment_id, start_time, end_time
+                            segment_id,
+                            start_time,
+                            end_time,
                         )
                         break
 
                     # Case 4: New period contains existing interval entirely
-                    if period[0] <= existing_start_hour and period[-1] >= existing_end_hour:
+                    if (
+                        period[0] <= existing_start_hour
+                        and period[-1] >= existing_end_hour
+                    ):
                         has_overlap = True
                         # Use the new larger boundaries but keep the segment ID
                         segment_id = interval["segment_id"]
                         logger.debug(
                             "Expanding interval %d to contain: now %s-%s",
-                            segment_id, start_time, end_time
+                            segment_id,
+                            start_time,
+                            end_time,
                         )
                         break
 
@@ -427,7 +441,9 @@ class GrowattScheduleManager:
 
                     logger.debug(
                         "Using active interval %d for current hour: now %s-%s",
-                        segment_id, start_time, end_time
+                        segment_id,
+                        start_time,
+                        end_time,
                     )
                     has_overlap = True
 
@@ -454,17 +470,17 @@ class GrowattScheduleManager:
                     # Check if this interval overlaps with any already in the new list
                     existing_index = None
                     for j, existing in enumerate(self.tou_intervals):
-                        existing_start_hour = int(
-                            existing["start_time"].split(":")[0])
-                        existing_end_hour = int(
-                            existing["end_time"].split(":")[0])
+                        existing_start_hour = int(existing["start_time"].split(":")[0])
+                        existing_end_hour = int(existing["end_time"].split(":")[0])
 
                         period_start_hour = int(start_time.split(":")[0])
                         period_end_hour = int(end_time.split(":")[0])
 
                         # Check for any kind of overlap
-                        if (period_start_hour <= existing_end_hour and
-                                period_end_hour >= existing_start_hour):
+                        if (
+                            period_start_hour <= existing_end_hour
+                            and period_end_hour >= existing_start_hour
+                        ):
                             existing_index = j
                             break
 
@@ -475,11 +491,11 @@ class GrowattScheduleManager:
                         # Create the merged interval with the widest span
                         merged_start_hour = min(
                             int(start_time.split(":")[0]),
-                            int(existing["start_time"].split(":")[0])
+                            int(existing["start_time"].split(":")[0]),
                         )
                         merged_end_hour = max(
                             int(end_time.split(":")[0]),
-                            int(existing["end_time"].split(":")[0])
+                            int(existing["end_time"].split(":")[0]),
                         )
 
                         merged_interval = {
@@ -492,9 +508,12 @@ class GrowattScheduleManager:
 
                         logger.debug(
                             "Merging intervals: %s-%s and %s-%s into %s-%s",
-                            existing["start_time"], existing["end_time"],
-                            start_time, end_time,
-                            merged_interval["start_time"], merged_interval["end_time"]
+                            existing["start_time"],
+                            existing["end_time"],
+                            start_time,
+                            end_time,
+                            merged_interval["start_time"],
+                            merged_interval["end_time"],
                         )
 
                         self.tou_intervals[existing_index] = merged_interval
@@ -510,8 +529,7 @@ class GrowattScheduleManager:
                             }
                         )
 
-            logger.debug("Final tou_intervals count: %d",
-                         len(self.tou_intervals))
+            logger.debug("Final tou_intervals count: %d", len(self.tou_intervals))
 
             # Apply max intervals limit if needed
             if len(self.tou_intervals) > self.max_intervals:
@@ -738,8 +756,7 @@ class GrowattScheduleManager:
         if not header:
             header = " -= Growatt TOU Schedule =- "
 
-        col_widths = {"segment": 8, "start": 9,
-                      "end": 8, "mode": 15, "enabled": 8}
+        col_widths = {"segment": 8, "start": 9, "end": 8, "mode": 15, "enabled": 8}
         total_width = sum(col_widths.values()) + len(col_widths) - 1
 
         header_format = (
