@@ -330,7 +330,7 @@ def test_case_2024_08_16():
 def test_case_2025_01_05():
     """Test parameters for 2025-01-05 case."""
     return {
-        "battery_soc": 50,  # Starting battery level
+        "battery_soc": 10,  # Starting battery level
         "consumption": [5.2] * 24,  # Consumption pattern
         "expected_savings": 0.0,  # Expected cost savings
         "expected_charge": 0.0,  # Expected charged energy
@@ -463,7 +463,8 @@ def system_with_test_prices(
 ):
     """Provide a system configured with test prices for solar adaptation testing."""
     # Create system using the configured_system factory
-    system = configured_system(test_solar_adaptation_case, test_solar_adaptation_prices)
+    system = configured_system(
+        test_solar_adaptation_case, test_solar_adaptation_prices)
 
     # Make sure our system uses the same controller instance as the test will use
     system._controller = mock_controller  # noqa: SLF001

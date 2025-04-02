@@ -74,7 +74,7 @@ class Schedule:
                 if solar > 0:
                     solar_hours.append(f"Hour {hour}: {solar:.1f} kWh")
 
-            logger.info(
+            logger.debug(
                 "Schedule includes solar charging: %.1f kWh at %s",
                 total_solar,
                 ", ".join(solar_hours),

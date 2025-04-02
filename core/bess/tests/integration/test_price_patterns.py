@@ -142,12 +142,15 @@ class TestBatteryOptimization:
         logger.info("Testing case: %s", case_name)
 
         # Verify costs and savings
-        assert abs(schedule_data["summary"]["baseCost"] - expected["base_cost"]) < 1e-2
+        assert abs(schedule_data["summary"]
+                   ["baseCost"] - expected["base_cost"]) < 1e-2
         assert (
-            abs(schedule_data["summary"]["optimizedCost"] - expected["optimized_cost"])
+            abs(schedule_data["summary"]["optimizedCost"] -
+                expected["optimized_cost"])
             < 1e-2
         )
-        assert abs(schedule_data["summary"]["savings"] - expected["savings"]) < 1e-2
+        assert abs(schedule_data["summary"]
+                   ["savings"] - expected["savings"]) < 1e-2
 
         # Verify energy flows
         assert abs(total_charge - expected["charge"]) < 1e-1

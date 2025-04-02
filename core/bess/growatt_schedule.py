@@ -315,8 +315,8 @@ class GrowattScheduleManager:
 
             logger.debug("Consecutive periods: %s", consecutive_periods)
 
-            # Find the current active interval (that contains current hour)
-            current_interval = None
+            # Check which existing intervals contain or overlap with current hour
+            active_intervals = []
             for interval in old_intervals:
                 if not interval["enabled"]:
                     continue
@@ -324,75 +324,203 @@ class GrowattScheduleManager:
                 start_hour = int(interval["start_time"].split(":")[0])
                 end_hour = int(interval["end_time"].split(":")[0])
 
+                # Check if interval contains current hour
                 if start_hour <= self.current_hour <= end_hour:
-                    current_interval = interval
+                    active_intervals.append(interval)
                     logger.debug(
-                        "Found current interval: %s-%s",
+                        "Found active interval for hour %d: %s-%s",
+                        self.current_hour,
                         interval["start_time"],
                         interval["end_time"],
                     )
-                    break
 
-            # Convert periods to TOU intervals
+            # Now process each consecutive period, checking for overlaps with existing intervals
             for i, period in enumerate(consecutive_periods):
                 if not period:
                     continue
 
-                # Use next segment ID
+                # Default settings for a new interval
                 next_id = len(self.tou_intervals) + 1
-
-                # Check for current interval
                 segment_id = next_id
                 start_time = f"{period[0]:02d}:00"
+                end_time = f"{period[-1]:02d}:59"
 
-                # If period contains current hour and we have a current interval
-                if current_interval and (
-                    self.current_hour in period or period[0] == self.current_hour
-                ):
-                    # Reuse segment ID
-                    segment_id = current_interval["segment_id"]
+                # Check for overlaps with existing intervals from old_intervals
+                has_overlap = False
+                for interval in old_intervals:
+                    if not interval["enabled"]:
+                        continue
 
-                    # Use original start time if earlier
-                    start_hour = int(
-                        current_interval["start_time"].split(":")[0])
-                    if start_hour < period[0]:
-                        start_time = current_interval["start_time"]
+                    existing_start_hour = int(
+                        interval["start_time"].split(":")[0])
+                    existing_end_hour = int(interval["end_time"].split(":")[0])
+
+                    # Case 1: New period overlaps with start of existing interval
+                    if period[0] <= existing_start_hour and period[-1] >= existing_start_hour:
+                        has_overlap = True
+                        # Extend existing interval to start at period start
+                        if period[0] < existing_start_hour:
+                            segment_id = interval["segment_id"]
+                            # We'll use the period's start and extend to the existing interval's end
+                            end_time = interval["end_time"]
+                            logger.debug(
+                                "Extending interval %d backwards: now %s-%s",
+                                segment_id, start_time, end_time
+                            )
+                            break
+
+                    # Case 2: New period overlaps with end of existing interval
+                    if period[0] <= existing_end_hour and period[-1] >= existing_end_hour:
+                        has_overlap = True
+                        # Extend existing interval to end at period end
+                        if period[-1] > existing_end_hour:
+                            segment_id = interval["segment_id"]
+                            # We'll use the existing interval's start and extend to the period's end
+                            start_time = interval["start_time"]
+                            logger.debug(
+                                "Extending interval %d forwards: now %s-%s",
+                                segment_id, start_time, end_time
+                            )
+                            break
+
+                    # Case 3: New period is contained entirely within existing interval
+                    if existing_start_hour <= period[0] and existing_end_hour >= period[-1]:
+                        has_overlap = True
+                        # Just reuse the existing interval
+                        segment_id = interval["segment_id"]
+                        start_time = interval["start_time"]
+                        end_time = interval["end_time"]
+                        logger.debug(
+                            "Reusing interval %d that contains period: %s-%s",
+                            segment_id, start_time, end_time
+                        )
+                        break
+
+                    # Case 4: New period contains existing interval entirely
+                    if period[0] <= existing_start_hour and period[-1] >= existing_end_hour:
+                        has_overlap = True
+                        # Use the new larger boundaries but keep the segment ID
+                        segment_id = interval["segment_id"]
+                        logger.debug(
+                            "Expanding interval %d to contain: now %s-%s",
+                            segment_id, start_time, end_time
+                        )
+                        break
+
+                # If we have a current hour and it's in this period, prioritize using an active interval
+                if self.current_hour in period and active_intervals:
+                    # Use the first one if multiple
+                    active_interval = active_intervals[0]
+                    segment_id = active_interval["segment_id"]
+
+                    # If the period starts earlier than the active interval, extend backward
+                    if period[0] < int(active_interval["start_time"].split(":")[0]):
+                        start_time = f"{period[0]:02d}:00"
+                    else:
+                        start_time = active_interval["start_time"]
+
+                    # If the period ends later than the active interval, extend forward
+                    if period[-1] > int(active_interval["end_time"].split(":")[0]):
+                        end_time = f"{period[-1]:02d}:59"
+                    else:
+                        end_time = active_interval["end_time"]
 
                     logger.debug(
-                        "Adapting current interval: id=%d, start=%s (original=%s-%s)",
+                        "Using active interval %d for current hour: now %s-%s",
+                        segment_id, start_time, end_time
+                    )
+                    has_overlap = True
+
+                # Now create or add this interval
+                if not has_overlap or not self.tou_intervals:
+                    # This is a brand new non-overlapping interval or first interval
+                    logger.debug(
+                        "Creating new interval: id=%d, %s-%s",
                         segment_id,
                         start_time,
-                        current_interval["start_time"],
-                        current_interval["end_time"],
+                        end_time,
                     )
 
-                logger.debug(
-                    "Creating new interval: id=%d, %s-%s",
-                    segment_id,
-                    start_time,
-                    f"{period[-1]:02d}:59",
+                    self.tou_intervals.append(
+                        {
+                            "segment_id": segment_id,
+                            "batt_mode": "battery-first",
+                            "start_time": start_time,
+                            "end_time": end_time,
+                            "enabled": True,
+                        }
+                    )
+                else:
+                    # Check if this interval overlaps with any already in the new list
+                    existing_index = None
+                    for j, existing in enumerate(self.tou_intervals):
+                        existing_start_hour = int(
+                            existing["start_time"].split(":")[0])
+                        existing_end_hour = int(
+                            existing["end_time"].split(":")[0])
+
+                        period_start_hour = int(start_time.split(":")[0])
+                        period_end_hour = int(end_time.split(":")[0])
+
+                        # Check for any kind of overlap
+                        if (period_start_hour <= existing_end_hour and
+                                period_end_hour >= existing_start_hour):
+                            existing_index = j
+                            break
+
+                    if existing_index is not None:
+                        # Merge with existing interval
+                        existing = self.tou_intervals[existing_index]
+
+                        # Create the merged interval with the widest span
+                        merged_start_hour = min(
+                            int(start_time.split(":")[0]),
+                            int(existing["start_time"].split(":")[0])
+                        )
+                        merged_end_hour = max(
+                            int(end_time.split(":")[0]),
+                            int(existing["end_time"].split(":")[0])
+                        )
+
+                        merged_interval = {
+                            "segment_id": existing["segment_id"],
+                            "batt_mode": "battery-first",
+                            "start_time": f"{merged_start_hour:02d}:00",
+                            "end_time": f"{merged_end_hour:02d}:59",
+                            "enabled": True,
+                        }
+
+                        logger.debug(
+                            "Merging intervals: %s-%s and %s-%s into %s-%s",
+                            existing["start_time"], existing["end_time"],
+                            start_time, end_time,
+                            merged_interval["start_time"], merged_interval["end_time"]
+                        )
+
+                        self.tou_intervals[existing_index] = merged_interval
+                    else:
+                        # Add as a separate non-overlapping interval
+                        self.tou_intervals.append(
+                            {
+                                "segment_id": segment_id,
+                                "batt_mode": "battery-first",
+                                "start_time": start_time,
+                                "end_time": end_time,
+                                "enabled": True,
+                            }
+                        )
+
+            logger.debug("Final tou_intervals count: %d",
+                         len(self.tou_intervals))
+
+            # Apply max intervals limit if needed
+            if len(self.tou_intervals) > self.max_intervals:
+                logger.warning(
+                    "Too many TOU intervals (%d), truncating to maximum (%d)",
+                    len(self.tou_intervals),
+                    self.max_intervals,
                 )
-
-                self.tou_intervals.append(
-                    {
-                        "segment_id": segment_id,
-                        "batt_mode": "battery-first",
-                        "start_time": start_time,
-                        "end_time": f"{period[-1]:02d}:59",
-                        "enabled": True,
-                    }
-                )
-
-        logger.debug("Final tou_intervals count: %d", len(self.tou_intervals))
-
-        # Apply max intervals limit if needed
-        if len(self.tou_intervals) > self.max_intervals:
-            logger.warning(
-                "Too many TOU intervals (%d), truncating to maximum (%d)",
-                len(self.tou_intervals),
-                self.max_intervals,
-            )
-            self.tou_intervals = self.tou_intervals[: self.max_intervals]
+                self.tou_intervals = self.tou_intervals[: self.max_intervals]
 
     def get_daily_TOU_settings(self):
         """Get Growatt-specific TOU settings (battery-first intervals only)."""

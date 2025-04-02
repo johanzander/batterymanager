@@ -393,8 +393,7 @@ def _run_battery_optimization(
                 discharge_cycle_cost = 0  # Cost already included
             else:
                 # Adjust discharge cost based on solar ratio
-                discharge_cycle_cost = cycle_cost * \
-                    0.5 * (1 - solar_ratio * 0.5)
+                discharge_cycle_cost = cycle_cost * 0.5 * (1 - solar_ratio * 0.5)
 
             profit_per_kwh = discharge_price - stored_price - discharge_cycle_cost
 
@@ -418,8 +417,7 @@ def _run_battery_optimization(
                 )
 
     # Then, find regular grid charging trades
-    grid_trades = _find_profitable_trades(
-        prices, cycle_cost, min_profit_threshold)
+    grid_trades = _find_profitable_trades(prices, cycle_cost, min_profit_threshold)
     all_trades.extend(grid_trades)
 
     # Sort all trades by profit per kWh (most profitable first)
@@ -479,8 +477,7 @@ def _execute_trades_with_solar_priority(
         total_energy_in,
         total_solar_energy,
     )
-    logger.debug("Available capacity for charging: %.1f kWh",
-                 energy_for_discharge)
+    logger.debug("Available capacity for charging: %.1f kWh", energy_for_discharge)
 
     # Process virtual stored energy trades (energy already in battery)
     virtual_trades = []
@@ -622,6 +619,9 @@ def _sort_trades_by_profit(trades):
     return result
 
 
+"""Patch for the _process_virtual_trades function in optimize_battery."""
+
+
 def _process_virtual_trades(
     virtual_trades,
     state_of_energy,
@@ -632,82 +632,169 @@ def _process_virtual_trades(
     total_capacity,
     reserved_capacity,
     n_hours,
-    total_energy_out,
+    total_energy_out=0.0,
 ):
-    """Process virtual stored energy trades (energy already in battery)."""
+    """Process virtual stored energy trades (energy already in battery).
+
+    This improved implementation ensures that energy already in the battery
+    is appropriately discharged during all profitable hours, not just the
+    hours with absolute highest prices.
+
+    Key changes:
+    1. Evaluates discharge opportunities for all hours, not just those in virtual_trades
+    2. Prioritizes profitable discharge opportunities by profit per kWh
+    3. Adds detailed logging of discharge opportunities for better visibility
+
+    Args:
+        virtual_trades: List of trades for virtual stored energy
+        state_of_energy: Array of battery energy states
+        actions: Array of battery actions to update
+        discharge_capacities: Dict of remaining discharge capacity by hour
+        prices: List of hourly electricity prices
+        cycle_cost: Battery wear cost per kWh
+        total_capacity: Maximum battery capacity (kWh)
+        reserved_capacity: Minimum battery capacity (kWh)
+        n_hours: Number of hours
+        total_energy_out: Total energy output so far (kWh)
+
+    Returns:
+        float: Total virtual energy discharged
+    """
+    # Skip if no virtual trades
     if not virtual_trades:
         return 0.0
 
+    # Get total available virtual energy and its cost basis
     available_virtual_energy = virtual_trades[0].get("virtual_amount", 0)
     stored_price = virtual_trades[0].get("charge_price", 0)
-    logger.debug("Processing virtual stored energy: %.1f kWh",
-                 available_virtual_energy)
+    logger.debug("Processing virtual stored energy: %.1f kWh", available_virtual_energy)
 
-    # Track how much virtual energy we've planned to discharge
+    # IMPROVEMENT: Evaluate ALL hours for potential discharge
+    # Not just those in virtual_trades (which might be incomplete)
+    discharge_opportunities = []
+
+    for hour in range(n_hours):
+        # Skip hours with no discharge capacity
+        if discharge_capacities.get(hour, 0) <= 0:
+            continue
+
+        # Skip if SOE is insufficient
+        if hour > 0 and state_of_energy[hour] <= reserved_capacity + 0.1:
+            continue
+
+        # Skip if price is too low (unprofitable)
+        discharge_price = prices[hour]
+        if discharge_price <= stored_price:
+            logger.debug(
+                "Hour %d: Price %.3f below stored energy cost %.3f - skipping",
+                hour,
+                discharge_price,
+                stored_price,
+            )
+            continue
+
+        # Determine cycle cost application (already included in some cases)
+        cycle_cost_value = 0.0
+        if not virtual_trades[0].get("is_blended_cost", False):
+            cycle_cost_value = cycle_cost * 0.5  # Only discharge portion
+
+        profit_per_kwh = discharge_price - stored_price - cycle_cost_value
+
+        # Skip if unprofitable
+        if profit_per_kwh <= 0:
+            continue
+
+        # Calculate maximum discharge amount
+        max_discharge = min(
+            available_virtual_energy,
+            discharge_capacities[hour],
+            state_of_energy[hour] - reserved_capacity
+            if hour > 0
+            else available_virtual_energy,
+        )
+
+        # Skip if amount is too small
+        if max_discharge < 0.1:
+            continue
+
+        # Add to opportunities
+        discharge_opportunities.append(
+            {
+                "hour": hour,
+                "price": discharge_price,
+                "profit_per_kwh": profit_per_kwh,
+                "max_discharge": max_discharge,
+            }
+        )
+
+    # Sort opportunities by profit per kWh (highest first)
+    discharge_opportunities.sort(key=lambda x: x["profit_per_kwh"], reverse=True)
+
+    # Log the opportunities found
+    if discharge_opportunities:
+        logger.debug(
+            "Found %d discharge opportunities for virtual energy:",
+            len(discharge_opportunities),
+        )
+        for opp in discharge_opportunities:
+            logger.debug(
+                "Hour %d: Price %.3f, Profit %.3f/kWh, Max discharge: %.1f kWh",
+                opp["hour"],
+                opp["price"],
+                opp["profit_per_kwh"],
+                opp["max_discharge"],
+            )
+    else:
+        logger.debug("No profitable discharge opportunities found for virtual energy")
+        return 0.0
+
+    # Process discharge opportunities in order of profitability
     virtual_energy_planned = 0.0
     virtual_energy_out = 0.0
 
-    for trade in virtual_trades:
-        discharge_hour = trade["discharge_hour"]
-        discharge_price = prices[discharge_hour]
+    for opp in discharge_opportunities:
+        hour = opp["hour"]
+        max_discharge = opp["max_discharge"]
 
-        # Skip if we've planned all the virtual energy
+        # Skip if we've planned all virtual energy
         if virtual_energy_planned >= available_virtual_energy:
             break
 
-        # Check if we can discharge at this hour (capacity available)
-        available_capacity = discharge_capacities[discharge_hour]
-        if available_capacity <= 0:
-            continue
-
-        # Calculate discharge amount and profit
+        # Calculate discharge amount
         discharge_amount = min(
-            available_virtual_energy - virtual_energy_planned, available_capacity
+            available_virtual_energy - virtual_energy_planned, max_discharge
         )
 
-        # Get cycle cost from trade - it may be adjusted for solar ratio
-        discharge_cycle_cost = trade.get("cycle_cost", cycle_cost * 0.5)
-
-        discharge_profit = discharge_amount * (
-            discharge_price - stored_price - discharge_cycle_cost
-        )
-
-        # Skip if unprofitable or minimal discharge
-        if discharge_profit <= 0:
-            logger.debug(
-                "Skipping unprofitable virtual energy discharge at hour %d: profit=%.2f",
-                discharge_hour,
-                discharge_profit,
-            )
-            continue
-        if discharge_amount < 0.5:
+        # Skip if amount is too small
+        if discharge_amount < 0.1:
             continue
 
-        # Check if SOE is sufficient
-        if state_of_energy[discharge_hour] - reserved_capacity < discharge_amount:
-            continue
+        # Calculate profit
+        discharge_price = opp["price"]
+        profit = discharge_amount * opp["profit_per_kwh"]
 
         logger.debug(
-            "Virtual energy trade: Discharge %.1f kWh at hour %d",
+            "Virtual energy trade: Discharge %.1f kWh at hour %d (profit: %.2f)",
             discharge_amount,
-            discharge_hour,
+            hour,
+            profit,
         )
 
         # Apply discharge action
-        if actions[discharge_hour] != 0:
-            actions[discharge_hour] -= discharge_amount
+        if actions[hour] != 0:
+            actions[hour] -= discharge_amount
         else:
-            actions[discharge_hour] = -discharge_amount
+            actions[hour] = -discharge_amount
 
         # Update tracking variables
-        discharge_capacities[discharge_hour] -= discharge_amount
+        discharge_capacities[hour] -= discharge_amount
         virtual_energy_planned += discharge_amount
         virtual_energy_out += discharge_amount
 
-        # Update future SOE
+        # Update SOE for future hours
         _update_soe_after_action(
             state_of_energy,
-            discharge_hour,
+            hour,
             discharge_amount,
             total_capacity,
             reserved_capacity,
@@ -901,8 +988,7 @@ def _process_grid_trades(
     stored_energy_cost = None
     if virtual_stored_energy is not None:
         stored_energy_cost = virtual_stored_energy.get("price")
-        logger.debug("Using stored energy cost basis: %.3f SEK/kWh",
-                     stored_energy_cost)
+        logger.debug("Using stored energy cost basis: %.3f SEK/kWh", stored_energy_cost)
 
     for trade in grid_trades:
         charge_hour = trade["charge_hour"]
@@ -924,8 +1010,7 @@ def _process_grid_trades(
 
         # Calculate charge amount - convert max power (kW) to energy (kWh) for the hour
         # Since we're working with 1-hour intervals, kW directly translates to kWh
-        charge_amount = min(max_charge_power_kw,
-                            total_capacity - current_soe - 0.01)
+        charge_amount = min(max_charge_power_kw, total_capacity - current_soe - 0.01)
         charge_amount = min(charge_amount, energy_for_discharge)
 
         # Skip if minimal charge
@@ -979,8 +1064,7 @@ def _process_grid_trades(
                 )
                 # Adjust charge amount
                 charge_amount = max(0, total_capacity - current_soe - 0.01)
-                logger.debug(
-                    "Adjusted charge amount to %.1f kWh", charge_amount)
+                logger.debug("Adjusted charge amount to %.1f kWh", charge_amount)
                 if charge_amount < 0.1:
                     continue
 
@@ -1120,8 +1204,7 @@ def _validate_discharge_plan(
             potential_total_out,
         )
         # Scale down discharge plan
-        scale_factor = (potential_total_in - total_energy_out) / \
-            plan_total_discharge
+        scale_factor = (potential_total_in - total_energy_out) / plan_total_discharge
         scaled_plan = []
         for hour, amount in discharge_plan:
             scaled_amount = amount * scale_factor
@@ -1270,8 +1353,7 @@ def _apply_solar_charging(
 
     for hour in range(n_hours):
         if solar_charged[hour] > 0:
-            logger.debug("Hour %d: Adding %.1f kWh solar",
-                         hour, solar_charged[hour])
+            logger.debug("Hour %d: Adding %.1f kWh solar", hour, solar_charged[hour])
 
             # ONLY update future hours, NOT current hour
             for future_hour in range(hour + 1, n_hours):
@@ -1315,8 +1397,7 @@ def _find_profitable_trades(prices, cycle_cost, min_profit_threshold):
                 profitable_trades.append(trade)
 
     # Sort trades by profit per kWh (most profitable first)
-    profitable_trades.sort(key=lambda x: x.get(
-        "profit_per_kwh", 0), reverse=True)
+    profitable_trades.sort(key=lambda x: x.get("profit_per_kwh", 0), reverse=True)
     return profitable_trades
 
 
@@ -1353,14 +1434,12 @@ def _plan_discharges(primary_trade, trades, discharge_capacities, energy_to_disc
                 and secondary_trade.get("profit_per_kwh", 0) > 0
             ):
                 secondary_discharge = min(
-                    discharge_capacities.get(
-                        secondary_trade["discharge_hour"], 0),
+                    discharge_capacities.get(secondary_trade["discharge_hour"], 0),
                     energy_to_discharge,
                 )
                 if secondary_discharge > 0:
                     discharge_plan.append(
-                        (secondary_trade["discharge_hour"],
-                         secondary_discharge)
+                        (secondary_trade["discharge_hour"], secondary_discharge)
                     )
                     energy_to_discharge -= secondary_discharge
                     logger.debug(
@@ -1481,7 +1560,7 @@ def _calculate_costs_and_savings(
     }
 
     # Log the final costs to ensure consistency across all displays
-    logger.info(
+    logger.debug(
         "Optimization complete: Base cost: %.2f, Optimized: %.2f, Savings: %.2f",
         result["base_cost"],
         result["optimized_cost"],
